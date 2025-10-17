@@ -1,445 +1,242 @@
-// app.js - PotesHub v3 (Groups, admin color, robust vocal, local notifs)
-// IMPORTANT: replace VAPID_KEY with your Firebase Web Push public key
-import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js';
-import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged, setPersistence, browserLocalPersistence, browserSessionPersistence } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-auth.js';
-import { getDatabase, ref, push, set, update, onValue, get, query, orderByChild, limitToLast, remove } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-database.js';
-import { getMessaging, getToken, onMessage } from 'https://www.gstatic.com/firebasejs/10.8.0/firebase-messaging.js';
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>PotesHub — V4</title>
+  <link rel="stylesheet" href="style.css?v=20">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1a1a1a" />
+</head>
+<body>
+  <!-- AUTH -->
+  <div id="authPage" class="auth-container">
+    <div class="container">
+      <div class="auth-box">
+        <h1 class="auth-title"><span class="icon">🎮</span> PotesHub</h1>
+        <p class="auth-subtitle">App entre potes — connecte-toi</p>
+        <div id="errorMsg" class="error-message"></div>
+        <div id="successMsg" class="success-message"></div>
 
-const firebaseConfig = {
-  apiKey: "AIzaSyDmsgNKyXAckhoHpdRSuZxYgR3DmzXWmd0",
-  authDomain: "poteshub-8d37b.firebaseapp.com",
-  databaseURL: "https://poteshub-8d37b-default-rtdb.europe-west1.firebasedatabase.app",
-  projectId: "poteshub-8d37b",
-  storageBucket: "poteshub-8d37b.firebasedatabase.app",
-  messagingSenderId: "457001877075",
-  appId: "1:457001877075:web:1e0d09aec0c02349db10a6"
-};
+        <div id="loginForm">
+          <div class="input-group"><label for="loginEmail">Email</label><input id="loginEmail" type="email"/></div>
+          <div class="input-group"><label for="loginPassword">Mot de passe</label><input id="loginPassword" type="password"/></div>
+          <div class="checkbox-group"><input id="rememberMe" type="checkbox"/><label for="rememberMe">Rester connecté</label></div>
+          <button id="loginBtn" class="btn btn-primary">Se connecter</button>
+          <button id="showRegisterBtn" class="btn btn-secondary">Créer un compte</button>
+        </div>
 
-// paste your public VAPID key if you want FCM
-const VAPID_KEY = "BB17qG7_5I5vQUX8Dltmk0_GTbBB9avg-pUR7PMBHPpghVE6yybsle-FDapwWEdd3_xRp-3zMMlWl6ssqH792R0";
-
-const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-const db = getDatabase(app);
-let messaging;
-try { messaging = getMessaging(app); } catch(e){ console.warn('messaging init', e); }
-
-let currentUser = null;
-let currentUserData = null;
-let adminUnlocked = false;
-let activeGroupId = null;
-let activeRoom = 'general';
-
-// DOM helpers
-const $ = id => document.getElementById(id);
-const ui = {
-  authPage: $('authPage'), mainApp: $('mainApp'),
-  loginEmail: $('loginEmail'), loginPassword: $('loginPassword'),
-  registerUsername: $('registerUsername'), registerEmail: $('registerEmail'), registerPassword: $('registerPassword'),
-  loginForm: $('loginForm'), registerForm: $('registerForm'),
-  userName: $('userName'), userAvatar: $('userAvatar'), userMood: $('userMood'),
-  logoutBtn: $('logoutBtn'), roomSelect: $('roomSelect'), messagesList: $('messagesList'), messageInput: $('messageInput'), sendBtn: $('sendBtn'),
-  btnQuickPlay: $('btnQuickPlay'), btnHelp: $('btnHelp'), btnPoll: $('btnPoll'), btnChallenge: $('btnChallenge'),
-  openRecorderBtn: $('openRecorderBtn'), openDictBtn: $('openDictBtn'), btnMood: $('btnMood'), openProfileBtn: $('openProfileBtn'), openAdminBtn: $('openAdminBtn'),
-  navGroups: $('navGroups'), navAdmin: $('navAdmin'),
-  // modals
-  recModal: $('recModal'), startRecBtn: $('startRecBtn'), stopRecBtn: $('stopRecBtn'), closeRecBtn: $('closeRecBtn'), recStatus: $('recStatus'), recPreview: $('recPreview'),
-  profileModal: $('profileModal'), profileName: $('profileName'), profileBio: $('profileBio'), profileEmoji: $('profileEmoji'), saveProfileBtn: $('saveProfileBtn'), closeProfileBtn: $('closeProfileBtn'),
-  groupsModal: $('groupsModal'), groupsList: $('groupsList'), newGroupName: $('newGroupName'), createGroupBtn: $('createGroupBtn'),
-  activeGroupInfo: $('activeGroupInfo'), inviteUsername: $('inviteUsername'), inviteBtn: $('inviteBtn'), closeGroupsBtn: $('closeGroupsBtn'), startVoiceRoomBtn: $('startVoiceRoomBtn'),
-  adminPassModal: $('adminPassModal'), adminPassInput: $('adminPassInput'), adminPassSubmitBtn: $('adminPassSubmitBtn'), adminPassCancelBtn: $('adminPassCancelBtn'),
-  adminPanel: $('adminPanel'), admBroadcastBtn: $('admBroadcastBtn'), admNotifBtn: $('admNotifBtn'), admPromoteBtn: $('admPromoteBtn'), admSetColorBtn: $('admSetColorBtn'), admExportUsersBtn: $('admExportUsersBtn'), admClearMessagesBtn: $('admClearMessagesBtn'),
-  adminUsersList: $('adminUsersList'), adminMessagesList: $('adminMessagesList'), closeAdminBtn: $('closeAdminBtn'),
-  errorMsg: $('errorMsg'), successMsg: $('successMsg'),
-  openGroupsBtn: $('openGroupsBtn'),
-  themeColorPreview: $('themeColorPreview'),
-};
-
-// event binding
-$('loginBtn').addEventListener('click', login);
-$('showRegisterBtn').addEventListener('click', ()=>{ ui.loginForm.classList.add('hidden'); ui.registerForm.classList.remove('hidden'); });
-$('showLoginBtn').addEventListener('click', ()=>{ ui.registerForm.classList.add('hidden'); ui.loginForm.classList.remove('hidden'); });
-$('registerBtn').addEventListener('click', register);
-ui.logoutBtn.addEventListener('click', logout);
-ui.sendBtn.addEventListener('click', sendMessage);
-ui.messageInput.addEventListener('keydown', e=>{ if(e.key==='Enter') sendMessage(); });
-
-ui.btnQuickPlay.addEventListener('click', ()=> quickMessage('jouer'));
-ui.btnHelp.addEventListener('click', ()=> quickMessage('aide'));
-ui.btnPoll.addEventListener('click', ()=> openModal('pollModal'));
-ui.btnChallenge.addEventListener('click', ()=> openModal('challengeModal'));
-
-ui.openRecorderBtn.addEventListener('click', ()=> openModal('recModal'));
-ui.openDictBtn.addEventListener('click', startDictation);
-ui.btnMood.addEventListener('click', ()=> { const m = prompt('Ton mood du jour'); if(m) setMood(m); });
-
-ui.createGroupBtn.addEventListener('click', createGroup);
-ui.closeGroupsBtn.addEventListener('click', ()=> closeModal('groupsModal'));
-ui.openGroupsBtn.addEventListener('click', ()=> openModal('groupsModal'));
-ui.inviteBtn.addEventListener('click', inviteToGroup);
-ui.startVoiceRoomBtn.addEventListener('click', startVoiceRoom);
-
-ui.profileName && ui.profileName.addEventListener('input', ()=>{});
-ui.openProfileBtn.addEventListener('click', openProfile);
-ui.saveProfileBtn.addEventListener('click', saveProfile);
-ui.closeProfileBtn.addEventListener('click', ()=> closeModal('profileModal'));
-
-ui.adminPassSubmitBtn.addEventListener('click', submitAdminPass);
-ui.adminPassCancelBtn.addEventListener('click', ()=> closeModal('adminPassModal'));
-ui.openAdminBtn.addEventListener('click', ()=> openModal('adminPassModal'));
-
-ui.admBroadcastBtn.addEventListener('click', adminBroadcast);
-ui.admNotifBtn.addEventListener('click', adminCreateNotificationNode);
-ui.admPromoteBtn.addEventListener('click', openPromoteDialog);
-ui.admSetColorBtn.addEventListener('click', adminSetColor);
-ui.admExportUsersBtn.addEventListener('click', adminExportUsersCSV);
-ui.admClearMessagesBtn.addEventListener('click', adminClearMessages);
-ui.closeAdminBtn.addEventListener('click', ()=> closeModal('adminPanel'));
-
-// recorder logic (Base64)
-let mediaRecorder = null; let audioChunks = [];
-const MAX_AUDIO_BYTES = 2_500_000;
-
-async function startRecording(){
-  try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-    mediaRecorder = new MediaRecorder(stream);
-    audioChunks = [];
-    mediaRecorder.ondataavailable = e => audioChunks.push(e.data);
-    mediaRecorder.onstop = async () => {
-      const blob = new Blob(audioChunks, { type:'audio/webm' });
-      if (blob.size > MAX_AUDIO_BYTES) { showError('Enregistrement trop long'); return; }
-      const dataUrl = await blobToDataURL(blob);
-      const payload = { text:'(Message vocal)', audioData: dataUrl, timestamp: Date.now(), username: currentUserData.username, userId: currentUser.uid, type:'audio', room: activeRoom, groupId: activeGroupId || null };
-      await push(ref(db,'messages'), payload);
-      ui.recPreview.innerHTML = `<audio controls src="${dataUrl}"></audio>`;
-      showSuccess('Enregistrement envoyé');
-    };
-    mediaRecorder.start();
-    ui.recStatus.textContent = 'Enregistrement...'; ui.startRecBtn.disabled=true; ui.stopRecBtn.disabled=false;
-  } catch(e){ showError('Micro inaccessible'); console.error(e); }
-}
-function stopRecording(){ if (mediaRecorder && mediaRecorder.state!=='inactive') mediaRecorder.stop(); ui.recStatus.textContent='Traitement...'; ui.startRecBtn.disabled=false; ui.stopRecBtn.disabled=true;}
-ui.startRecBtn.addEventListener('click', startRecording); ui.stopRecBtn.addEventListener('click', stopRecording); ui.closeRecBtn.addEventListener('click', ()=> closeModal('recModal'));
-
-function blobToDataURL(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); }); }
-
-// speech recognition
-const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-let recognition = null;
-if (SpeechRecognition) {
-  recognition = new SpeechRecognition(); recognition.lang='fr-FR'; recognition.interimResults=false; recognition.maxAlternatives=1;
-  recognition.addEventListener('result', e=>{ const text = e.results[0][0].transcript; ui.messageInput.value = (ui.messageInput.value ? ui.messageInput.value + ' ' : '') + text; showSuccess('Dictée insérée'); });
-  recognition.addEventListener('error', e=> showError('Erreur dictée: '+e.error));
-}
-function startDictation(){ if (!recognition) return showError('Dictée non supportée'); try { recognition.start(); showSuccess('Parle maintenant...'); } catch(e){ showError('Impossible de démarrer la dictée'); } }
-
-// basic UI helpers
-function openModal(id){ document.getElementById(id).classList.add('active'); }
-function closeModal(id){ document.getElementById(id).classList.remove('active'); }
-function showError(msg){ ui.errorMsg.textContent = msg; ui.errorMsg.style.display='block'; setTimeout(()=> ui.errorMsg.style.display='none',5000); }
-function showSuccess(msg){ ui.successMsg.textContent = msg; ui.successMsg.style.display='block'; setTimeout(()=> ui.successMsg.style.display='none',3000); }
-function escapeHtml(s){ if (s==null) return ''; return String(s).replaceAll('&','&amp;').replaceAll('<','&lt;').replaceAll('>','&gt;'); }
-function escapeJs(s){ if (!s) return ''; return String(s).replace(/'/g,"\\'").replace(/"/g,'\\"').replace(/\n/g,' '); }
-
-// auth
-async function register(){
-  const username = ui.registerUsername.value.trim();
-  const email = ui.registerEmail.value.trim();
-  const password = ui.registerPassword.value;
-  if (!username||!email||!password) return showError('Remplis tous les champs');
-  try {
-    const res = await createUserWithEmailAndPassword(auth, email, password);
-    await set(ref(db,'users/'+res.user.uid), { username, email, isAdmin:false, createdAt: Date.now() });
-    showSuccess('Compte créé');
-    ui.registerForm.classList.add('hidden'); ui.loginForm.classList.remove('hidden');
-  } catch(e){ showError(e.message); }
-}
-async function login(){
-  const email = ui.loginEmail.value.trim(); const password = ui.loginPassword.value;
-  if(!email||!password) return showError('Email & mot de passe requis');
-  try {
-    const persistence = document.getElementById('rememberMe')?.checked ? browserLocalPersistence : browserSessionPersistence;
-    await setPersistence(auth, persistence);
-    await signInWithEmailAndPassword(auth, email, password);
-  } catch(e){ showError(e.message); }
-}
-async function logout(){ try { await signOut(auth); } catch(e){ console.warn(e); } }
-
-// auth state listener
-onAuthStateChanged(auth, async user=>{
-  if (!user) { currentUser=null; currentUserData=null; ui.authPage.classList.remove('hidden'); ui.mainApp.classList.add('hidden'); return; }
-  currentUser = user;
-  const snap = await get(ref(db,'users/'+user.uid));
-  currentUserData = snap.exists() ? snap.val() : { username:'Utilisateur', isAdmin:false };
-  ui.userName.textContent = currentUserData.username || 'Utilisateur';
-  ui.userAvatar.textContent = (currentUserData.username||'U')[0].toUpperCase();
-  ui.userMood.textContent = currentUserData.mood || '—';
-  ui.authPage.classList.add('hidden'); ui.mainApp.classList.remove('hidden');
-  // admin controls
-  if (currentUserData.isAdmin) { ui.openAdminBtn.style.display='inline-block'; ui.navAdmin.style.display='block'; }
-  else { ui.openAdminBtn.style.display='none'; ui.navAdmin.style.display='none'; }
-  // load rooms, settings
-  await loadRooms(); attachMessagesListener(); loadSettings();
-  registerServiceWorkerAndNotifications();
-});
-
-// rooms load
-async function loadRooms(){
-  const snap = await get(ref(db,'rooms'));
-  const defaultRooms = [{id:'general',name:'Général'},{id:'gaming',name:'Gaming'}];
-  const rooms = snap.exists() ? Object.keys(snap.val()).map(k=>({ id:k, name: snap.val()[k].name || k })) : defaultRooms;
-  if (!rooms.find(r=>r.id==='general')) rooms.unshift({id:'general',name:'Général'});
-  ui.roomSelect.innerHTML = rooms.map(r=>`<option value="${r.id}">${r.name}</option>`).join('');
-  ui.roomSelect.addEventListener('change', ()=> { activeRoom = ui.roomSelect.value; attachMessagesListener(); });
-}
-
-// messages send
-async function sendMessage(){
-  if (!currentUser) return showError('Connecte-toi');
-  const text = ui.messageInput.value.trim();
-  if (!text) return;
-  const payload = { text, timestamp: Date.now(), username: currentUserData.username, userId: currentUser.uid, type:'message', room: activeRoom, groupId: activeGroupId || null };
-  await push(ref(db,'messages'), payload);
-  ui.messageInput.value = '';
-  showSuccess('Message envoyé');
-}
-
-// messages listener (last 200)
-function attachMessagesListener(){
-  ui.messagesList.innerHTML = '<div style="color:rgba(255,255,255,0.5)">Chargement...</div>';
-  const q = query(ref(db,'messages'), orderByChild('timestamp'), limitToLast(200));
-  onValue(q, snapshot=>{
-    const arr=[];
-    snapshot.forEach(ch=>{
-      const v = ch.val(); v.id = ch.key;
-      if (!v.room) v.room='general';
-      // filter: room + group membership (if groupId present)
-      if (v.room===activeRoom) {
-        if (!v.groupId) arr.push(v);
-        else { // group message: check membership
-          arr.push(v); // we'll filter when rendering by activeGroupId below
-        }
-      }
-    });
-    arr.sort((a,b)=>a.timestamp - b.timestamp);
-    // render, but filter group messages to activeGroupId
-    const rendered = arr.filter(m => {
-      if (!m.groupId) return true;
-      return m.groupId === activeGroupId;
-    }).map(m => renderMessage(m)).join('');
-    ui.messagesList.innerHTML = rendered;
-    ui.messagesList.scrollTop = ui.messagesList.scrollHeight;
-    // local notif for new messages
-    snapshot.forEach(ch=>{
-      const m = ch.val();
-      // if message is new and not from me and in active room but tab may be background -> show notif
-      if (m && m.timestamp && currentUser && m.userId !== currentUser.uid && m.room===activeRoom) {
-        showLocalNotification(`${m.username}`, m.text || (m.type==='audio' ? 'Message vocal' : 'Nouveau message'));
-      }
-    });
-    renderAdminMessagesList(arr);
-  });
-}
-
-function renderMessage(m){
-  const t = new Date(m.timestamp).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
-  const mine = currentUser && m.userId === currentUser.uid;
-  const audioHtml = m.audioData ? `<div style="margin-top:6px;"><audio controls src="${m.audioData}"></audio></div>` : '';
-  const groupLabel = m.groupId ? `<span style="font-size:12px;color:rgba(255,255,255,0.5);margin-left:6px;">#${escapeHtml(m.groupId)}</span>` : '';
-  return `<div class="message-item" id="msg-${m.id}">
-    <div class="message-header">
-      <span class="message-author">${escapeHtml(m.username)}${mine? ' (moi)':''}${groupLabel}</span>
-      <span class="message-time">${t}</span>
+        <div id="registerForm" class="hidden">
+          <div class="input-group"><label for="registerUsername">Pseudo</label><input id="registerUsername" type="text"/></div>
+          <div class="input-group"><label for="registerEmail">Email</label><input id="registerEmail" type="email"/></div>
+          <div class="input-group"><label for="registerPassword">Mot de passe</label><input id="registerPassword" type="password"/></div>
+          <button id="registerBtn" class="btn btn-primary">Créer mon compte</button>
+          <button id="showLoginBtn" class="btn btn-secondary">J'ai déjà un compte</button>
+        </div>
+      </div>
     </div>
-    <div class="message-text">${escapeHtml(m.text||'')}</div>
-    ${audioHtml}
-    <div style="display:flex;gap:8px;margin-top:8px;">
-      <button class="btn btn-secondary" onclick="window.openReplyPrompt && window.openReplyPrompt('${m.id}','${escapeJs(m.username||'')}')">↩ Répondre</button>
-      <button class="btn btn-secondary" onclick="window.speakText && window.speakText('${escapeJs(m.text||'')}')">🔊 Écouter</button>
-      ${mine? `<button class="delete-btn" onclick="window.deleteMessage && window.deleteMessage('${m.id}')">Supprimer</button>` : ''}
+  </div>
+
+  <!-- MAIN APP -->
+  <div id="mainApp" class="hidden">
+    <header class="app-header">
+      <div class="left">
+        <div id="userAvatar" class="user-avatar">U</div>
+        <div>
+          <div id="userName" class="user-name">Utilisateur</div>
+          <div id="userMood" class="user-mood">—</div>
+        </div>
+      </div>
+      <div class="right">
+        <select id="roomSelect" class="room-select"></select>
+        <button id="openGroupsBtn" class="btn btn-secondary">Chats</button>
+        <button id="openProfileBtn" class="btn btn-secondary">Profil</button>
+        <button id="openAdminBtn" class="btn btn-secondary" style="display:none;">Admin</button>
+        <button id="logoutBtn" class="logout-btn">Déconnexion</button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <aside class="side-panel">
+        <div class="section">
+          <h4>Actions rapides</h4>
+          <div class="action-list">
+            <button id="btnQuickPlay" class="action">🎮 Qui joue ?</button>
+            <button id="btnHelp" class="action">🆘 Aide</button>
+            <button id="btnPoll" class="action">🗳️ Sondage</button>
+            <button id="btnChallenge" class="action">🔥 Défi</button>
+            <button id="openRecorderBtn" class="action">🎤 Enregistrer</button>
+            <button id="openDictBtn" class="action">🎙️ Dictée</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <h4>Paramètres</h4>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button id="btnMood" class="btn btn-secondary">😎 Mood</button>
+            <div id="themePreview">Thème : <span id="themeColorPreview" style="display:inline-block;width:18px;height:18px;border-radius:4px;vertical-align:middle;margin-left:8px;"></span></div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Chat -->
+      <section id="chatSection" class="chat-section">
+        <div class="messages-header">
+          <h3 id="messagesTitle">Fil des messages</h3>
+          <div id="unreadBadge" class="badge hidden">0</div>
+        </div>
+        <div id="messagesList" class="messages-list"></div>
+        <div class="composer">
+          <input id="messageInput" placeholder="Écris un message..." />
+          <button id="sendBtn" class="btn btn-primary">Envoyer</button>
+        </div>
+      </section>
+
+      <!-- Polls -->
+      <section id="pollsSection" class="hidden content-section">
+        <div class="section-header">
+          <h3>Sondages</h3>
+          <button id="createPollOpenBtn" class="btn btn-primary">Créer sondage</button>
+        </div>
+        <div id="pollsList"></div>
+      </section>
+
+      <!-- Challenges -->
+      <section id="challengesSection" class="hidden content-section">
+        <div class="section-header">
+          <h3>Défis</h3>
+          <button id="createChallengeOpenBtn" class="btn btn-primary">Créer défi</button>
+        </div>
+        <div id="challengesList"></div>
+      </section>
+    </main>
+
+    <!-- bottom nav -->
+    <nav class="bottom-nav">
+      <button id="navChat" class="nav-btn active">💬 Chat</button>
+      <button id="navPolls" class="nav-btn">🗳️ Polls</button>
+      <button id="navChallenges" class="nav-btn">🔥 Challenges</button>
+      <button id="navAdmin" class="nav-btn" style="display:none;">⚙️ Admin</button>
+    </nav>
+  </div>
+
+  <!-- GROUPS / CHATS MODAL -->
+  <div id="groupsModal" class="modal">
+    <div class="modal-content">
+      <h2>Chats & Groupes</h2>
+      <div style="display:flex;gap:12px;">
+        <div style="flex:1">
+          <h4>Liste des groupes</h4>
+          <div id="groupsList" style="max-height:220px;overflow:auto;"></div>
+          <div style="margin-top:8px;">
+            <input id="newGroupName" placeholder="Nom du groupe" />
+            <button id="createGroupBtn" class="btn btn-primary">Créer</button>
+          </div>
+        </div>
+        <div style="flex:1">
+          <h4>Groupe actif</h4>
+          <div id="activeGroupInfo"></div>
+          <div style="margin-top:8px;">
+            <input id="inviteUsername" placeholder="Inviter par pseudo" />
+            <button id="inviteBtn" class="btn btn-secondary">Inviter</button>
+            <div style="margin-top:8px;"><button id="startVoiceRoomBtn" class="btn btn-primary">Démarrer vocal</button></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button id="closeGroupsBtn" class="btn btn-secondary">Fermer</button>
+      </div>
     </div>
-  </div>`;
-}
+  </div>
 
-// simple reply & speak
-window.openReplyPrompt = async (msgId, uname) => {
-  const reply = prompt(`Répondre à ${uname}:`);
-  if (!reply || !currentUser) return;
-  await push(ref(db,'messages'), { text: reply, timestamp: Date.now(), username: currentUserData.username, userId: currentUser.uid, type:'reply', room: activeRoom, parentId: msgId, groupId: activeGroupId || null });
-  showSuccess('Réponse envoyée');
-};
-window.speakText = (text) => { if (!('speechSynthesis' in window)) return showError('Synthèse vocale non dispo'); const u=new SpeechSynthesisUtterance(text); u.lang='fr-FR'; window.speechSynthesis.cancel(); window.speechSynthesis.speak(u); };
-
-// quick messages
-async function quickMessage(kind){
-  if (!currentUser) return showError('Connecte-toi');
-  const map = { jouer:'Qui est dispo pour jouer ?', aide:"J'ai besoin d'aide !" };
-  const text = map[kind]||'Message rapide';
-  await push(ref(db,'messages'), { text, timestamp: Date.now(), username: currentUserData.username, userId: currentUser.uid, type:kind, room: activeRoom, groupId: activeGroupId || null });
-  showSuccess('Envoyé');
-}
-
-// polls & challenges (kept simple) - reuse previous logic (omitted for brevity in this snippet for space)
-// ... you can reuse the poll logic from prior app version if needed
-
-// Groups
-async function createGroup(){
-  const name = ui.newGroupName.value.trim();
-  if (!name) return showError('Nom requis');
-  const g = await push(ref(db,'groups'), { name, owner: currentUser.uid, createdAt: Date.now(), members: { [currentUser.uid]: true } });
-  showSuccess('Groupe créé'); ui.newGroupName.value = ''; renderGroups();
-}
-async function renderGroups(){
-  const snap = await get(ref(db,'groups'));
-  const groups = snap.exists() ? Object.entries(snap.val()).map(([id,g]) => ({ id, ...g })) : [];
-  ui.groupsList.innerHTML = groups.map(g => `<div style="padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)">
-    <strong>${escapeHtml(g.name)}</strong><div style="font-size:12px;color:rgba(255,255,255,0.6)">Membres: ${g.members ? Object.keys(g.members).length : 0}</div>
-    <div style="margin-top:6px;"><button class="btn btn-secondary" onclick="joinGroup('${g.id}')">Ouvrir</button></div>
-  </div>`).join('');
-}
-window.joinGroup = async (groupId) => {
-  // set active group and ensure member exists
-  activeGroupId = groupId;
-  // ensure membership
-  const memRef = ref(db, `groups/${groupId}/members/${currentUser.uid}`);
-  await set(memRef, true);
-  ui.activeGroupInfo.innerHTML = `Groupe actif : <strong>${groupId}</strong>`;
-  closeModal('groupsModal');
-};
-
-// invite by username
-async function inviteToGroup(){
-  const name = ui.inviteUsername.value.trim();
-  if (!name || !activeGroupId) return showError('Pseudo requis et groupe actif');
-  // search users by username (simple scan)
-  const snap = await get(ref(db,'users'));
-  if (!snap.exists()) return showError('Aucun utilisateur');
-  const users = snap.val();
-  let foundUid = null;
-  Object.entries(users).forEach(([uid,u])=>{ if (u.username === name) foundUid = uid; });
-  if (!foundUid) return showError('Utilisateur introuvable');
-  await set(ref(db, `groups/${activeGroupId}/members/${foundUid}`), true);
-  showSuccess('Invité ajouté');
-}
-
-// voice room (basic placeholder using DB signalling for WebRTC would be added here)
-function startVoiceRoom(){ alert('Vocal groupe: fonctionnalité beta — en dev (WebRTC required).'); }
-
-// Admin: password check & tools
-async function submitAdminPass(){
-  const pass = ui.adminPassInput.value || ''; closeModal('adminPassModal');
-  if (!pass) return showError('Mot de passe requis');
-  const h = await sha256Hex(pass);
-  const snap = await get(ref(db,'admin/passwordHash'));
-  if (snap.exists() && snap.val() === h) {
-    adminUnlocked = true; openModal('adminPanel'); loadAdminUsers(); loadAdminMessages(); showSuccess('Admin OK');
-  } else showError('Mot de passe admin incorrect');
-}
-async function adminInitChangePassword(){
-  if (!currentUser) return showError('Connecte-toi');
-  const newPass = prompt('Nouveau mot de passe admin:');
-  if (!newPass) return;
-  const h = await sha256Hex(newPass);
-  await set(ref(db,'admin/passwordHash'), h);
-  showSuccess('Mot de passe admin initialisé');
-}
-window.adminInitChangePassword = adminInitChangePassword;
-
-async function loadAdminUsers(){
-  const snap = await get(ref(db,'users'));
-  const users = snap.exists() ? Object.entries(snap.val()) : [];
-  ui.adminUsersList.innerHTML = users.map(([uid,u]) => `<div style="display:flex;justify-content:space-between;padding:8px;border-bottom:1px solid rgba(255,255,255,0.03)">
-    <div><strong>${escapeHtml(u.username)}</strong><div style="font-size:12px;color:rgba(255,255,255,0.6)">${escapeHtml(u.email||'')}</div></div>
-    <div style="display:flex;gap:6px;">
-      <button class="btn btn-secondary" onclick="toggleAdmin('${uid}', ${u.isAdmin? 'true':'false'})">${u.isAdmin? 'Retirer' : 'Promouvoir'}</button>
-      <button class="delete-btn" onclick="removeUser('${uid}')">Suppr</button>
+  <!-- Recorder modal -->
+  <div id="recModal" class="modal">
+    <div class="modal-content">
+      <h2>Enregistrement vocal</h2>
+      <p id="recStatus">Prêt</p>
+      <div style="display:flex;gap:8px;">
+        <button id="startRecBtn" class="btn btn-primary">Démarrer</button>
+        <button id="stopRecBtn" class="btn btn-secondary" disabled>Stop</button>
+        <button id="closeRecBtn" class="btn btn-secondary">Fermer</button>
+      </div>
+      <div id="recPreview" style="margin-top:12px;"></div>
     </div>
-  </div>`).join('');
-}
-window.toggleAdmin = async (uid, cur)=> { if(!adminUnlocked) return showError('Admin req'); await update(ref(db,'users/'+uid), { isAdmin: !cur }); loadAdminUsers(); showSuccess('Rôle modifié'); };
-window.removeUser = async (uid)=>{ if(!adminUnlocked) return showError('Admin req'); if(!confirm('Supprimer ?')) return; await remove(ref(db,'users/'+uid)); loadAdminUsers(); };
+  </div>
 
-// admin messages
-async function loadAdminMessages(){ const snap = await get(ref(db,'messages')); const arr = []; if (snap.exists()) { snap.forEach(ch=>arr.push({ id: ch.key, ...ch.val() })); } ui.adminMessagesList.innerHTML = arr.map(m=>`<div style="display:flex;justify-content:space-between;padding:6px;border-bottom:1px solid rgba(255,255,255,0.03)"><div><strong>${escapeHtml(m.username)}</strong><div style="font-size:12px;color:rgba(255,255,255,0.6)">${escapeHtml(m.text||'')}</div></div><div><button class="delete-btn" onclick="deleteMessage('${m.id}')">Suppr</button></div></div>`).join(''); }
+  <!-- Poll modal -->
+  <div id="pollModal" class="modal">
+    <div class="modal-content">
+      <h2>Créer un sondage</h2>
+      <div class="input-group"><label>Question</label><input id="pollQuestion" /></div>
+      <div class="input-group"><label>Options (séparées par ; )</label><input id="pollOptions" placeholder="Option1;Option2;Option3" /></div>
+      <div style="display:flex;gap:8px;">
+        <button id="createPollBtn" class="btn btn-primary">Créer</button>
+        <button id="closePollBtn" class="btn btn-secondary">Annuler</button>
+      </div>
+    </div>
+  </div>
 
-// admin actions
-async function adminBroadcast(){ if(!adminUnlocked) return showError('Admin req'); const t = prompt('Message broadcast:'); if(!t) return; await push(ref(db,'messages'), { text:t, timestamp: Date.now(), username:'ADMIN', userId:'ADMIN', type:'broadcast', room:'general' }); showSuccess('Broadcast envoyé'); }
-async function adminCreateNotificationNode(){ if(!adminUnlocked) return showError('Admin req'); const title = prompt('Titre'); const body = prompt('Message'); if(!title||!body) return; await push(ref(db,'notifications'), { title, body, createdAt: Date.now(), by: currentUser.uid }); showSuccess('Noeud notifications créé'); }
-async function openPromoteDialog(){ openModal('adminPanel'); loadAdminUsers(); }
-async function adminSetColor(){ if(!adminUnlocked) return showError('Admin req'); const c = prompt('Hex couleur (ex: #8b5cf6)'); if(!c) return; await set(ref(db,'settings/themeColor'), c); applyThemeColor(c); showSuccess('Couleur changée'); }
-async function adminExportUsersCSV(){ if(!adminUnlocked) return showError('Admin req'); const snap = await get(ref(db,'users')); const users = snap.exists() ? Object.entries(snap.val()) : []; const csv = ['uid,username,email,isAdmin,createdAt', ...users.map(([uid,u])=> `${uid},"${(u.username||'').replace(/"/g,'""')}","${(u.email||'').replace(/"/g,'""')}",${u.isAdmin?1:0},${u.createdAt||''}`) ].join('\n'); downloadBlob(csv,'users.csv','text/csv'); showSuccess('CSV généré'); }
-async function adminClearMessages(){ if(!adminUnlocked) return showError('Admin req'); if(!confirm('Vider tous les messages ?')) return; await remove(ref(db,'messages')); showSuccess('Messages vidés'); }
+  <!-- Challenge modal -->
+  <div id="challengeModal" class="modal">
+    <div class="modal-content">
+      <h2>Créer un défi</h2>
+      <div class="input-group"><label>Défi</label><input id="challengeText" placeholder="Ex: Envoie une photo drôle" /></div>
+      <div class="input-group"><label>Durée (min)</label><input id="challengeDuration" type="number" value="60" /></div>
+      <div style="display:flex;gap:8px;">
+        <button id="createChallengeBtn" class="btn btn-primary">Créer</button>
+        <button id="closeChallengeBtn" class="btn btn-secondary">Annuler</button>
+      </div>
+    </div>
+  </div>
 
-// delete message
-window.deleteMessage = async (id) => {
-  if (!currentUser) return showError('Connecte-toi');
-  const snap = await get(ref(db,'messages/'+id)); const m = snap.val(); if(!m) return showError('Introuvable');
-  if (m.userId === currentUser.uid || adminUnlocked) { await remove(ref(db,'messages/'+id)); showSuccess('Supprimé'); } else showError('Tu n\'as pas le droit');
-};
+  <!-- Profile modal -->
+  <div id="profileModal" class="modal">
+    <div class="modal-content">
+      <h2>Mon profil</h2>
+      <div class="input-group"><label>Pseudo</label><input id="profileName" /></div>
+      <div class="input-group"><label>Bio</label><input id="profileBio" /></div>
+      <div class="input-group"><label>Emoji</label><input id="profileEmoji" /></div>
+      <div style="display:flex;gap:8px;">
+        <button id="saveProfileBtn" class="btn btn-primary">Sauvegarder</button>
+        <button id="closeProfileBtn" class="btn btn-secondary">Annuler</button>
+      </div>
+    </div>
+  </div>
 
-// settings: theme color
-async function loadSettings(){
-  const snap = await get(ref(db,'settings/themeColor'));
-  const c = snap.exists() ? snap.val() : '#6b21a8';
-  applyThemeColor(c);
-  ui.themeColorPreview.style.background = c;
-}
-function applyThemeColor(c){
-  try { document.documentElement.style.setProperty('--primary', c); ui.themeColorPreview.style.background = c; } catch(e){ console.warn(e); }
-}
+  <!-- Admin pass modal -->
+  <div id="adminPassModal" class="modal">
+    <div class="modal-content">
+      <h2>Mot de passe admin</h2>
+      <div class="input-group"><label>Mot de passe</label><input id="adminPassInput" type="password" /></div>
+      <div style="display:flex;gap:8px;">
+        <button id="adminPassSubmitBtn" class="btn btn-primary">Valider</button>
+        <button id="adminPassCancelBtn" class="btn btn-secondary">Annuler</button>
+      </div>
+    </div>
+  </div>
 
-// groups render on open
-ui.openGroupsBtn.addEventListener('click', ()=> renderGroups());
+  <!-- Admin panel -->
+  <div id="adminPanel" class="modal">
+    <div class="modal-content">
+      <h2>Panel Admin</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <button id="admBroadcastBtn" class="btn btn-primary">Broadcast</button>
+        <button id="admNotifBtn" class="btn btn-secondary">Créer notif</button>
+        <button id="admPromoteBtn" class="btn btn-secondary">Promouvoir/Démouvoir</button>
+        <button id="admSetColorBtn" class="btn btn-secondary">Changer couleur</button>
+        <button id="admExportUsersBtn" class="btn btn-secondary">Export users CSV</button>
+        <button id="admClearMessagesBtn" class="btn btn-secondary">Vider messages</button>
+      </div>
+      <h3>Utilisateurs</h3>
+      <div id="adminUsersList" style="max-height:200px;overflow:auto;"></div>
+      <h3>Messages</h3>
+      <div id="adminMessagesList" style="max-height:200px;overflow:auto;"></div>
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button id="closeAdminBtn" class="btn btn-secondary">Fermer</button>
+      </div>
+    </div>
+  </div>
 
-// render admin messages small helper
-function renderAdminMessagesList(arr){ ui.adminMessagesList.innerHTML = arr.map(m => `<div style="display:flex;justify-content:space-between;padding:6px;border-bottom:1px solid rgba(255,255,255,0.03)"><div><strong>${escapeHtml(m.username)}</strong><div style="font-size:12px;color:rgba(255,255,255,0.6)">${escapeHtml(m.text||'')}</div></div><div><button class="delete-btn" onclick="deleteMessage('${m.id}')">Suppr</button></div></div>`).join(''); }
-
-// notifications: local notifications when message arrives; register SW & FCM token
-async function registerServiceWorkerAndNotifications(){
-  if ('serviceWorker' in navigator) {
-    try { await navigator.serviceWorker.register('/sw.js'); console.log('sw registered'); } catch(e){ console.warn('sw reg fail', e); }
-  }
-  if (!messaging) return;
-  try {
-    const perm = await Notification.requestPermission();
-    if (perm === 'granted') {
-      if (VAPID_KEY && VAPID_KEY.indexOf('<')===-1) {
-        const token = await getToken(messaging, { vapidKey: VAPID_KEY });
-        console.log('fcm token', token);
-        if (token && currentUser) { await set(ref(db, `fcmTokens/${currentUser.uid}`), { token, ts: Date.now() }); }
-      } else console.warn('VAPID_KEY not set');
-    }
-    onMessage(messaging, payload => {
-      console.log('foreground fcm', payload);
-      showLocalNotification(payload.notification?.title || 'PotesHub', payload.notification?.body || '');
-    });
-  } catch(e){ console.warn(e); }
-}
-function showLocalNotification(title, body){
-  if (!('Notification' in window)) return;
-  if (Notification.permission !== 'granted') return;
-  navigator.serviceWorker.getRegistration().then(reg => {
-    if (reg) reg.showNotification(title, { body, icon: '/icon-192.png', tag: 'poteshub' });
-    else new Notification(title, { body, icon: '/icon-192.png' });
-  });
-}
-
-// utility: download
-function downloadBlob(content, filename, mime){ const blob = new Blob([content], { type: mime }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
-
-// blob->dataurl
-function blobToDataURL(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); }); }
-
-// sha256 helper for admin
-async function sha256Hex(message){ const msgUint8 = new TextEncoder().encode(message); const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8); const hashArray = Array.from(new Uint8Array(hashBuffer)); return hashArray.map(b=>b.toString(16).padStart(2,'0')).join(''); }
-window.sha256Hex = sha256Hex;
-
-// Fallback functions used by UI (reply/speak already set)
-window.openReplyPrompt = window.openReplyPrompt || (()=>{});
-
-// initial load of groups & settings
-renderGroups();
-loadSettings();
-
-console.log('PotesHub v3 loaded');
+<script type="module" src="app.js"></script>
+</body>
+</html>

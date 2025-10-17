@@ -1,13 +1,201 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>app_potes</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+<html lang="fr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>PotesHub — v3</title>
+  <link rel="stylesheet" href="style.css?v=10">
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#1a1a1a" />
+</head>
+<body>
+  <!-- AUTH -->
+  <div id="authPage" class="auth-container">
+    <div class="container">
+      <div class="auth-box">
+        <h1 class="auth-title"><span class="icon">🎮</span> PotesHub</h1>
+        <p class="auth-subtitle">App entre potes — connecte-toi</p>
+        <div id="errorMsg" class="error-message"></div>
+        <div id="successMsg" class="success-message"></div>
+
+        <div id="loginForm">
+          <div class="input-group"><label for="loginEmail">Email</label><input id="loginEmail" type="email"/></div>
+          <div class="input-group"><label for="loginPassword">Mot de passe</label><input id="loginPassword" type="password"/></div>
+          <div class="checkbox-group"><input id="rememberMe" type="checkbox"/><label for="rememberMe">Rester connecté</label></div>
+          <button id="loginBtn" class="btn btn-primary">Se connecter</button>
+          <button id="showRegisterBtn" class="btn btn-secondary">Créer un compte</button>
+        </div>
+
+        <div id="registerForm" class="hidden">
+          <div class="input-group"><label for="registerUsername">Pseudo</label><input id="registerUsername" type="text"/></div>
+          <div class="input-group"><label for="registerEmail">Email</label><input id="registerEmail" type="email"/></div>
+          <div class="input-group"><label for="registerPassword">Mot de passe</label><input id="registerPassword" type="password"/></div>
+          <button id="registerBtn" class="btn btn-primary">Créer mon compte</button>
+          <button id="showLoginBtn" class="btn btn-secondary">J'ai déjà un compte</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- APP -->
+  <div id="mainApp" class="hidden">
+    <header class="app-header">
+      <div class="left">
+        <div id="userAvatar" class="user-avatar">U</div>
+        <div>
+          <div id="userName" class="user-name">Utilisateur</div>
+          <div id="userMood" class="user-mood">—</div>
+        </div>
+      </div>
+      <div class="right">
+        <select id="roomSelect" class="room-select"></select>
+        <button id="openGroupsBtn" class="btn btn-secondary">Chats</button>
+        <button id="openProfileBtn" class="btn btn-secondary">Profil</button>
+        <button id="openAdminBtn" class="btn btn-secondary" style="display:none;">Admin</button>
+        <button id="logoutBtn" class="logout-btn">Déconnexion</button>
+      </div>
+    </header>
+
+    <main class="app-main">
+      <aside id="sidePanel" class="side-panel">
+        <div class="section">
+          <h4>Actions rapides</h4>
+          <div class="action-list">
+            <button id="btnQuickPlay" class="action">🎮 Qui joue ?</button>
+            <button id="btnHelp" class="action">🆘 Aide</button>
+            <button id="btnPoll" class="action">🗳️ Sondage</button>
+            <button id="btnChallenge" class="action">🔥 Défi</button>
+            <button id="openRecorderBtn" class="action">🎤 Enregistrer</button>
+            <button id="openDictBtn" class="action">🎙️ Dictée</button>
+          </div>
+        </div>
+
+        <div class="section">
+          <h4>Paramètres</h4>
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <button id="btnMood" class="btn btn-secondary">😎 Mood</button>
+            <div id="themePreview">Thème : <span id="themeColorPreview" style="display:inline-block;width:18px;height:18px;border-radius:4px;vertical-align:middle;margin-left:8px;"></span></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="chat-section">
+        <div class="messages-header">
+          <h3 id="messagesTitle">Fil des messages</h3>
+          <div id="unreadBadge" class="badge hidden">0</div>
+        </div>
+        <div id="messagesList" class="messages-list"></div>
+
+        <div class="composer">
+          <input id="messageInput" placeholder="Écris un message..." />
+          <button id="sendBtn" class="btn btn-primary">Envoyer</button>
+        </div>
+      </section>
+    </main>
+
+    <!-- bottom nav -->
+    <nav class="bottom-nav">
+      <button id="navHome" class="nav-btn active">🏠</button>
+      <button id="navGroups" class="nav-btn">💬</button>
+      <button id="navAdmin" class="nav-btn" style="display:none;">⚙️</button>
+    </nav>
+  </div>
+
+  <!-- GROUPS / CHATS MODAL -->
+  <div id="groupsModal" class="modal">
+    <div class="modal-content">
+      <h2>Chats & Groupes</h2>
+      <div style="display:flex;gap:12px;">
+        <div style="flex:1">
+          <h4>Liste des groupes</h4>
+          <div id="groupsList" style="max-height:220px;overflow:auto;"></div>
+          <div style="margin-top:8px;">
+            <input id="newGroupName" placeholder="Nom du groupe" />
+            <button id="createGroupBtn" class="btn btn-primary">Créer</button>
+          </div>
+        </div>
+        <div style="flex:1">
+          <h4>Groupe actif</h4>
+          <div id="activeGroupInfo"></div>
+          <div style="margin-top:8px;">
+            <input id="inviteUsername" placeholder="Inviter par pseudo" />
+            <button id="inviteBtn" class="btn btn-secondary">Inviter</button>
+            <div style="margin-top:8px;"><button id="startVoiceRoomBtn" class="btn btn-primary">Démarrer vocal (beta)</button></div>
+          </div>
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button id="closeGroupsBtn" class="btn btn-secondary">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Recorder modal -->
+  <div id="recModal" class="modal">
+    <div class="modal-content">
+      <h2>Enregistrement vocal</h2>
+      <p id="recStatus">Prêt</p>
+      <div style="display:flex;gap:8px;">
+        <button id="startRecBtn" class="btn btn-primary">Démarrer</button>
+        <button id="stopRecBtn" class="btn btn-secondary" disabled>Stop</button>
+        <button id="closeRecBtn" class="btn btn-secondary">Fermer</button>
+      </div>
+      <div id="recPreview" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <!-- Profile modal -->
+  <div id="profileModal" class="modal">
+    <div class="modal-content">
+      <h2>Mon profil</h2>
+      <div class="input-group"><label>Pseudo</label><input id="profileName" /></div>
+      <div class="input-group"><label>Bio</label><input id="profileBio" /></div>
+      <div class="input-group"><label>Emoji</label><input id="profileEmoji" /></div>
+      <div style="display:flex;gap:8px;">
+        <button id="saveProfileBtn" class="btn btn-primary">Sauvegarder</button>
+        <button id="closeProfileBtn" class="btn btn-secondary">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin pass modal -->
+  <div id="adminPassModal" class="modal">
+    <div class="modal-content">
+      <h2>Mot de passe admin</h2>
+      <div class="input-group"><label>Mot de passe</label><input id="adminPassInput" type="password" /></div>
+      <div style="display:flex;gap:8px;">
+        <button id="adminPassSubmitBtn" class="btn btn-primary">Valider</button>
+        <button id="adminPassCancelBtn" class="btn btn-secondary">Annuler</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Admin panel -->
+  <div id="adminPanel" class="modal">
+    <div class="modal-content">
+      <h2>Panel Admin</h2>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+        <button id="admBroadcastBtn" class="btn btn-primary">Broadcast</button>
+        <button id="admNotifBtn" class="btn btn-secondary">Créer notif</button>
+        <button id="admPromoteBtn" class="btn btn-secondary">Promouvoir/Démouvoir</button>
+        <button id="admSetColorBtn" class="btn btn-secondary">Changer couleur</button>
+        <button id="admExportUsersBtn" class="btn btn-secondary">Export users CSV</button>
+        <button id="admClearMessagesBtn" class="btn btn-secondary">Vider messages</button>
+      </div>
+
+      <h3>Utilisateurs</h3>
+      <div id="adminUsersList" style="max-height:200px;overflow:auto;"></div>
+
+      <h3>Messages</h3>
+      <div id="adminMessagesList" style="max-height:200px;overflow:auto;"></div>
+
+      <div style="display:flex;gap:8px;margin-top:10px;">
+        <button id="closeAdminBtn" class="btn btn-secondary">Fermer</button>
+      </div>
+    </div>
+  </div>
+
+<script type="module" src="app.js"></script>
+</body>
 </html>

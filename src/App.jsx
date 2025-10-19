@@ -1,5 +1,43 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { User, Calendar, Bell, Settings, LogOut, Plus, Trash2, Check, X, Sparkles, Users, Clock, Phone, Mic, MicOff, PhoneOff, Send, MessageCircle, Zap } from 'lucide-react';
+<button
+                      onClick={() => joinEvent(evt.id)}
+                      disabled={evt.attendees && evt.attendees[user.uid]}
+                      className={`w-full py-4 rounded-2xl font-black transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2 ${
+                        evt.attendees && evt.attendees[user.uid]
+                          ? 'bg-green-100 text-green-700 cursor-not-allowed'
+                          : 'bg-gradient-to-r from-pink-500 to-orange-500 text-white hover:shadow-xl'
+                      }`}
+                    >
+                      {evt.attendees && evt.attendees[user.uid] ? (
+                        <>
+                          <Check className="w-5 h-5" />
+                          Tu participes déjà ! 🎉
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-5 h-5" />
+                          Je participe !
+                        </>
+                      )}
+                    </button>
+                    {evt.attendees && Object.keys(evt.attendees).length > 0 && (
+                      <div className="mt-4 pt-4 border-t-2 border-gray-100">
+                        <p className="text-sm font-black text-gray-500 mb-3 flex items-center gap-2">
+                          <Users className="w-4 h-4" />
+                          Participants ({Object.keys(evt.attendees).length})
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {Object.values(evt.attendees).map((attendee, idx) => (
+                            <span key={idx} className="bg-gradient-to-r from-pink-100 to-orange-100 text-pink-700 px-4 py-2 rounded-full font-bold text-sm">
+                              {attendee.username}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}import React, { useState, useEffect, useRef } from 'react';
+import { User, Calendar, Bell, Settings, LogOut, Plus, Trash2, Check, X, Sparkles, Users, Clock, Phone, Mic, MicOff, PhoneOff, Send, MessageCircle, Zap, Edit3 } from 'lucide-react';
+import { auth, database } from './firebase';
+import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
+import { ref, push, set, onValue, remove, get } from 'firebase/database';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -22,100 +60,168 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [showCallModal, setShowCallModal] = useState(false);
+  const [customResponses, setCustomResponses] = useState({});
+  const [showCustomResponseModal, setShowCustomResponseModal] = useState(null);
+  const [customResponseText, setCustomResponseText] = useState('');
   const localStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
 
   const requestTypes = ['🎮 Jouer', '🍕 Manger', '🎬 Ciné', '⚽ Sport', '🎉 Sortir', '💪 Fitness', '🎵 Concert', '☕ Café'];
 
   useEffect(() => {
-    setTimeout(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      if (currentUser) {
+        const userRef = ref(database, `users/${currentUser.uid}`);
+        const snapshot = await get(userRef);
+        if (snapshot.exists()) {
+          const userData = snapshot.val();
+          setUsername(userData.username);
+        }
+        setUser(currentUser);
+        loadFirebaseData();
+      } else {
+        setUser(null);
+      }
       setLoading(false);
-    }, 1500);
+    });
+    return () => unsubscribe();
   }, []);
 
-  const addNotification = (message) => {
-    const newNotif = { id: Date.now(), message, time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) };
-    setNotifications(prev => [newNotif, ...prev]);
+  const loadFirebaseData = () => {
+    const requestsRef = ref(database, 'requests');
+    onValue(requestsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const arr = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+        setRequests(arr.sort((a, b) => b.timestamp - a.timestamp));
+      } else {
+        setRequests([]);
+      }
+    });
+
+    const eventsRef = ref(database, 'events');
+    onValue(eventsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const arr = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+        setEvents(arr.sort((a, b) => new Date(a.date) - new Date(b.date)));
+      } else {
+        setEvents([]);
+      }
+    });
+
+    const notificationsRef = ref(database, 'notifications');
+    onValue(notificationsRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        const arr = Object.keys(data).map(key => ({ id: key, ...data[key] }));
+        setNotifications(arr.sort((a, b) => b.timestamp - a.timestamp));
+      } else {
+        setNotifications([]);
+      }
+    });
   };
 
-  const handleSignUp = () => {
+  const addNotification = async (message) => {
+    const notifRef = ref(database, 'notifications');
+    await push(notifRef, { message, time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), timestamp: Date.now() });
+  };
+
+  const handleSignUp = async () => {
     if (!email || !password || !username) return alert('⚠️ Remplis tous les champs');
-    setUser({ email, username });
-    addNotification(`🎉 ${username} a rejoint l'app !`);
+    try {
+      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+      await set(ref(database, `users/${userCredential.user.uid}`), { username, email, createdAt: Date.now() });
+      addNotification(`🎉 ${username} a rejoint l'app !`);
+    } catch (error) {
+      alert('❌ ' + error.message);
+    }
   };
 
-  const handleSignIn = () => {
+  const handleSignIn = async () => {
     if (!email || !password) return alert('⚠️ Remplis tous les champs');
-    setUser({ email, username: email.split('@')[0] });
-    addNotification(`👋 Connexion réussie !`);
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+    } catch (error) {
+      alert('❌ ' + error.message);
+    }
   };
 
-  const handleLogout = () => {
-    setUser(null);
-    setIsAdmin(false);
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setIsAdmin(false);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const handleAdminLogin = () => {
     if (adminPassword === 'admin123') {
       setIsAdmin(true);
       addNotification('⚙️ Mode admin activé');
+      setShowAdminPanel(false);
     } else {
       alert('❌ Mot de passe incorrect');
     }
     setAdminPassword('');
   };
 
-  const addRequest = () => {
+  const addRequest = async () => {
     if (!newRequestType || !newRequestMessage) return alert('⚠️ Remplis tous les champs');
-    const newReq = {
-      id: Date.now(),
+    await push(ref(database, 'requests'), {
       user: username || email.split('@')[0],
+      userId: user.uid,
       type: newRequestType,
       message: newRequestMessage,
       status: 'pending',
-      responses: []
-    };
-    setRequests(prev => [newReq, ...prev]);
+      responses: {},
+      timestamp: Date.now()
+    });
     setNewRequestType('');
     setNewRequestMessage('');
-    addNotification(`✨ ${newReq.user} : ${newRequestType}`);
+    addNotification(`✨ ${username || email.split('@')[0]} : ${newRequestType}`);
   };
 
-  const respondToRequest = (requestId, response) => {
-    setRequests(prev => prev.map(req => {
-      if (req.id === requestId) {
-        return { ...req, responses: [...req.responses, { user: username || email.split('@')[0], response }] };
-      }
-      return req;
-    }));
+  const respondToRequest = async (requestId, response, customText = null) => {
+    await set(ref(database, `requests/${requestId}/responses/${user.uid}`), {
+      user: username || email.split('@')[0],
+      response,
+      customText: customText || null,
+      timestamp: Date.now()
+    });
     addNotification(`👍 Réponse à une demande`);
+    setShowCustomResponseModal(null);
+    setCustomResponseText('');
   };
 
-  const deleteRequest = (id) => {
-    setRequests(prev => prev.filter(r => r.id !== id));
+  const deleteRequest = async (id) => {
+    await remove(ref(database, `requests/${id}`));
     addNotification('🗑️ Demande supprimée');
   };
 
-  const addEvent = () => {
+  const addEvent = async () => {
     if (!newEvent.title || !newEvent.date || !newEvent.time) return alert('⚠️ Remplis tous les champs');
-    const evt = { ...newEvent, id: Date.now(), attendees: [] };
-    setEvents(prev => [...prev, evt].sort((a, b) => new Date(a.date) - new Date(b.date)));
+    await push(ref(database, 'events'), {
+      ...newEvent,
+      attendees: {},
+      createdBy: user.uid,
+      timestamp: Date.now()
+    });
     setNewEvent({ title: '', date: '', time: '' });
-    addNotification(`📅 Nouvel événement : ${evt.title}`);
+    addNotification(`📅 Nouvel événement : ${newEvent.title}`);
   };
 
-  const joinEvent = (eventId) => {
-    setEvents(prev => prev.map(evt => {
-      if (evt.id === eventId && !evt.attendees.includes(username || email.split('@')[0])) {
-        return { ...evt, attendees: [...evt.attendees, username || email.split('@')[0]] };
-      }
-      return evt;
-    }));
+  const joinEvent = async (eventId) => {
+    await set(ref(database, `events/${eventId}/attendees/${user.uid}`), {
+      username: username || email.split('@')[0],
+      timestamp: Date.now()
+    });
     addNotification(`🎉 Participation confirmée`);
   };
 
-  const deleteEvent = (id) => {
-    setEvents(prev => prev.filter(e => e.id !== id));
+  const deleteEvent = async (id) => {
+    await remove(ref(database, `events/${id}`));
     addNotification('🗑️ Événement supprimé');
   };
 
@@ -157,19 +263,24 @@ export default function App() {
       
       const audioChunks = [];
       mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
-      mediaRecorder.onstop = () => {
+      mediaRecorder.onstop = async () => {
         const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-        const newReq = {
-          id: Date.now(),
-          user: username || email.split('@')[0],
-          type: '🎤 Vocal',
-          message: 'Message vocal',
-          audioUrl: URL.createObjectURL(audioBlob),
-          status: 'pending',
-          responses: []
+        const reader = new FileReader();
+        reader.readAsDataURL(audioBlob);
+        reader.onloadend = async () => {
+          await push(ref(database, 'requests'), {
+            user: username || email.split('@')[0],
+            userId: user.uid,
+            type: '🎤 Vocal',
+            message: 'Message vocal',
+            audioUrl: reader.result,
+            status: 'pending',
+            responses: {},
+            timestamp: Date.now()
+          });
+          addNotification('🎤 Message vocal envoyé');
         };
-        setRequests(prev => [newReq, ...prev]);
-        addNotification('🎤 Message vocal envoyé');
+        stream.getTracks().forEach(track => track.stop());
       };
       mediaRecorder.start();
       setIsRecording(true);
@@ -373,7 +484,6 @@ export default function App() {
                 >
                   Se connecter
                 </button>
-                <p className="text-sm text-gray-500 text-center font-medium">Mot de passe : admin123</p>
               </div>
             ) : (
               <div className="p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border-2 border-green-300">
@@ -386,6 +496,44 @@ export default function App() {
             >
               Fermer
             </button>
+          </div>
+        </div>
+      )}
+
+      {showCustomResponseModal && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
+            <h3 className="text-2xl font-black mb-4 bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
+              💬 Réponse personnalisée
+            </h3>
+            <textarea
+              placeholder="Écris ta réponse..."
+              value={customResponseText}
+              onChange={(e) => setCustomResponseText(e.target.value)}
+              className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 focus:border-purple-500 outline-none resize-none font-medium"
+              rows="4"
+            />
+            <div className="flex gap-3 mt-4">
+              <button
+                onClick={() => {
+                  setShowCustomResponseModal(null);
+                  setCustomResponseText('');
+                }}
+                className="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold hover:bg-gray-200 transition-all"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={() => {
+                  if (customResponseText.trim()) {
+                    respondToRequest(showCustomResponseModal, 'custom', customResponseText);
+                  }
+                }}
+                className="flex-1 bg-gradient-to-r from-purple-600 to-pink-500 text-white py-4 rounded-xl font-black hover:shadow-xl transition-all"
+              >
+                Envoyer
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -510,7 +658,7 @@ export default function App() {
                         className="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 rounded-2xl font-black hover:shadow-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
                       >
                         <Check className="w-5 h-5" />
-                        Je suis chaud ! 🔥
+                        Chaud ! 🔥
                       </button>
                       <button
                         onClick={() => respondToRequest(req.id, 'no')}
@@ -520,21 +668,37 @@ export default function App() {
                         Pas dispo
                       </button>
                     </div>
-                    {req.responses.length > 0 && (
+                    <button
+                      onClick={() => setShowCustomResponseModal(req.id)}
+                      className="w-full mt-3 bg-gradient-to-r from-blue-500 to-purple-500 text-white py-4 rounded-2xl font-black hover:shadow-xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
+                    >
+                      <Edit3 className="w-5 h-5" />
+                      Réponse personnalisée ✍️
+                    </button>
+                    {req.responses && Object.keys(req.responses).length > 0 && (
                       <div className="mt-4 pt-4 border-t-2 border-gray-100">
                         <p className="text-sm font-black text-gray-500 mb-2 flex items-center gap-2">
                           <Users className="w-4 h-4" />
-                          Réponses ({req.responses.length})
+                          Réponses ({Object.keys(req.responses).length})
                         </p>
                         <div className="space-y-2">
-                          {req.responses.map((resp, idx) => (
-                            <div key={idx} className="flex items-center gap-2 bg-gray-50 p-3 rounded-xl">
-                              <span className="font-bold text-gray-700">{resp.user}</span>
-                              <span className={`px-3 py-1 rounded-full text-sm font-black ${
-                                resp.response === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
-                              }`}>
-                                {resp.response === 'yes' ? '✅ Chaud' : '❌ Non'}
-                              </span>
+                          {Object.values(req.responses).map((resp, idx) => (
+                            <div key={idx} className="bg-gray-50 p-3 rounded-xl">
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className="font-bold text-gray-700">{resp.user}</span>
+                                {resp.response !== 'custom' && (
+                                  <span className={`px-3 py-1 rounded-full text-sm font-black ${
+                                    resp.response === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'
+                                  }`}>
+                                    {resp.response === 'yes' ? '✅ Chaud' : '❌ Non'}
+                                  </span>
+                                )}
+                              </div>
+                              {resp.customText && (
+                                <p className="text-gray-600 font-medium mt-2 bg-blue-50 p-2 rounded-lg border-l-4 border-blue-400">
+                                  💬 {resp.customText}
+                                </p>
+                              )}
                             </div>
                           ))}
                         </div>

@@ -660,3 +660,145 @@ export default function App() {
             <div className="bg-white/90 backdrop-blur-xl rounded-3xl p-6 shadow-lg">
               <h3 className="font-bold text-xl mb-4 flex items-center gap-2">
                 <Calendar className="w-6 h-6 text-purple-600" />
+                Nouvel événement
+              </h3>
+              <div className="space-y-3">
+                <input
+                  type="text"
+                  value={newEvent.title}
+                  onChange={(e) => setNewEvent({...newEvent, title: e.target.value})}
+                  placeholder="🎉 Titre de l'événement"
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none"
+                />
+                <input
+                  type="date"
+                  value={newEvent.date}
+                  onChange={(e) => setNewEvent({...newEvent, date: e.target.value})}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none"
+                />
+                <input
+                  type="time"
+                  value={newEvent.time}
+                  onChange={(e) => setNewEvent({...newEvent, time: e.target.value})}
+                  className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none"
+                />
+                <button
+                  onClick={addEvent}
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-3 rounded-xl font-bold hover:shadow-xl transition-all flex items-center justify-center gap-2"
+                >
+                  <Sparkles className="w-5 h-5" />
+                  Créer l'événement
+                </button>
+              </div>
+            </div>
+
+            {events.map((event) => (
+              <div key={event.id} className="bg-white/90 backdrop-blur-xl rounded-3xl p-6 shadow-lg">
+                <div className="flex items-start justify-between mb-3">
+                  <div className="flex-1">
+                    <h4 className="font-black text-xl text-gray-800 mb-2">{event.title}</h4>
+                    <div className="flex items-center gap-2 text-gray-600">
+                      <Clock className="w-4 h-4" />
+                      <p className="font-medium">
+                        {new Date(event.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} à {event.time}
+                      </p>
+                    </div>
+                  </div>
+                  {(isAdmin || event.createdBy === user.uid) && (
+                    <button
+                      onClick={() => deleteEvent(event.id)}
+                      className="text-red-500 hover:bg-red-100 p-2 rounded-xl transition-all"
+                    >
+                      <Trash2 className="w-5 h-5" />
+                    </button>
+                  )}
+                </div>
+                
+                {event.attendees && Object.keys(event.attendees).length > 0 && (
+                  <div className="mt-4 p-4 bg-green-50 rounded-xl">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Users className="w-5 h-5 text-green-600" />
+                      <p className="font-bold text-green-700">{Object.keys(event.attendees).length} participant(s)</p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {Object.values(event.attendees).map((attendee, idx) => (
+                        <span key={idx} className="px-3 py-1 bg-white text-green-700 rounded-full font-bold text-sm shadow-sm">
+                          {attendee.username}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {(!event.attendees || !event.attendees[user.uid]) && (
+                  <button
+                    onClick={() => joinEvent(event.id)}
+                    className="w-full mt-4 bg-gradient-to-r from-blue-500 to-purple-500 text-white py-3 rounded-xl font-bold hover:shadow-xl transition-all"
+                  >
+                    🎉 Je participe !
+                  </button>
+                )}
+              </div>
+            ))}
+          </>
+        )}
+
+        {/* Onglet Notifications */}
+        {activeTab === 'notifications' && (
+          <div className="space-y-3">
+            {notifications.length === 0 && (
+              <div className="bg-white/90 backdrop-blur-xl rounded-3xl p-8 text-center shadow-lg">
+                <Bell className="w-16 h-16 text-gray-300 mx-auto mb-4" />
+                <p className="text-gray-500 font-medium">Aucune notification</p>
+              </div>
+            )}
+            {notifications.map((notif) => (
+              <div key={notif.id} className="bg-white/90 backdrop-blur-xl rounded-3xl p-4 shadow-lg flex items-start gap-4">
+                <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-2xl flex items-center justify-center flex-shrink-0">
+                  <Bell className="w-6 h-6 text-white" />
+                </div>
+                <div className="flex-1">
+                  <p className="text-gray-800 font-bold">{notif.message}</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {new Date(notif.time).toLocaleString('fr-FR', {
+                      day: 'numeric',
+                      month: 'short',
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      {/* Barre flottante d'actions rapides (mobile) */}
+      <div className="fixed bottom-4 left-1/2 transform -translate-x-1/2 z-10 sm:hidden">
+        <div className="bg-gradient-to-r from-purple-600 to-pink-500 rounded-full shadow-2xl p-2 flex gap-2">
+          <button
+            onClick={isRecording ? stopRecording : startRecording}
+            className={`p-3 rounded-full transition-all ${
+              isRecording ? 'bg-red-500 animate-pulse' : 'bg-white/20 hover:bg-white/30'
+            }`}
+          >
+            <Mic className="w-5 h-5 text-white" />
+          </button>
+          <button
+            onClick={startCall}
+            className="p-3 bg-white/20 hover:bg-white/30 rounded-full transition-all"
+          >
+            <Phone className="w-5 h-5 text-white" />
+          </button>
+          <button
+            onClick={() => setActiveTab('requests')}
+            className="p-3 bg-white/20 hover:bg-white/30 rounded-full transition-all"
+          >
+            <Plus className="w-5 h-5 text-white" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

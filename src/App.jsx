@@ -3,672 +3,446 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>App Potes 🎉</title>
+  <title>App Potes</title>
   <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    * { box-sizing: border-box; }
-    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; }
-    .hidden { display: none !important; }
-    .glassmorphic { background: rgba(255,255,255,0.95); backdrop-filter: blur(20px); }
-    @keyframes slideIn { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-    .animate-slideIn { animation: slideIn 0.3s ease-out; }
-  </style>
 </head>
-<body class="bg-gradient-to-br from-purple-50 via-pink-50 to-orange-50">
+<body class="bg-gradient-to-br from-purple-50 to-orange-50">
 
-<div id="app"></div>
+<div id="root"></div>
 
 <script>
-// ========== BASE DE DONNÉES EN MÉMOIRE ==========
-const DB = {
+const app = {
+  currentUser: null,
   users: {},
   requests: {},
   events: {},
-  notifications: [],
   messages: {},
-  currentUser: null
-};
+  notifications: [],
+  selectedTab: 'requests',
+  selectedType: null,
+  selectedChatUser: null,
+  customReqId: null,
 
-// ========== SAUVEGARDE LOCAL ==========
-function saveDB() {
-  localStorage.setItem('appPotesDB', JSON.stringify(DB));
-}
+  init() {
+    this.load();
+    this.requestNotifPermission();
+    this.render();
+  },
 
-function loadDB() {
-  const saved = localStorage.getItem('appPotesDB');
-  if (saved) {
-    const data = JSON.parse(saved);
-    Object.assign(DB, data);
-  }
-}
+  save() {
+    const data = { users: this.users, requests: this.requests, events: this.events, messages: this.messages, notifications: this.notifications, currentUser: this.currentUser };
+    localStorage.setItem('appPotes', JSON.stringify(data));
+  },
 
-// ========== NOTIFICATIONS ==========
-function sendNotif(title, body = '') {
-  if ('Notification' in window && Notification.permission === 'granted') {
-    new Notification(title, { icon: '🎉', body });
-  }
-}
+  load() {
+    const data = localStorage.getItem('appPotes');
+    if (data) {
+      const parsed = JSON.parse(data);
+      Object.assign(this, parsed);
+    }
+  },
 
-function addNotification(message) {
-  const notif = {
-    id: Date.now(),
-    message,
-    time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }),
-    timestamp: Date.now()
-  };
-  DB.notifications.unshift(notif);
-  saveDB();
-  sendNotif(message);
-  render();
-}
+  requestNotifPermission() {
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
+  },
 
-// ========== AUTH ==========
-function handleSignUp(email, password, username) {
-  if (!email || !password || !username) {
-    alert('⚠️ Remplis tous les champs');
-    return;
-  }
-  if (Object.values(DB.users).some(u => u.email === email)) {
-    alert('❌ Email déjà utilisé');
-    return;
-  }
-  const userId = 'user_' + Date.now();
-  DB.users[userId] = { id: userId, username, email, isAdmin: false, isBanned: false };
-  DB.currentUser = { id: userId, username, email, isAdmin: false };
-  saveDB();
-  addNotification(`🎉 ${username} a rejoint l'app !`);
-  render();
-}
+  notify(msg) {
+    this.notifications.unshift({ id: Date.now(), msg, time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) });
+    this.save();
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification('App Potes', { body: msg, icon: '🎉' });
+    }
+    this.render();
+  },
 
-function handleSignIn(email, password) {
-  if (!email || !password) {
-    alert('⚠️ Remplis tous les champs');
-    return;
-  }
-  const user = Object.values(DB.users).find(u => u.email === email);
-  if (!user) {
-    alert('❌ Email introuvable');
-    return;
-  }
-  if (user.isBanned) {
-    alert('❌ Compte banni');
-    return;
-  }
-  DB.currentUser = { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin };
-  saveDB();
-  render();
-}
+  signup(username, email, password) {
+    if (!username || !email || !password) return alert('⚠️ Remplis tous les champs');
+    if (Object.values(this.users).some(u => u.email === email)) return alert('❌ Email déjà utilisé');
+    const id = 'u' + Date.now();
+    this.users[id] = { id, username, email, isAdmin: false, isBanned: false };
+    this.currentUser = { id, username, email, isAdmin: false };
+    this.save();
+    this.notify(`🎉 ${username} a rejoint l'app!`);
+  },
 
-function logout() {
-  DB.currentUser = null;
-  saveDB();
-  render();
-}
+  signin(email, password) {
+    if (!email || !password) return alert('⚠️ Remplis tous les champs');
+    const user = Object.values(this.users).find(u => u.email === email);
+    if (!user) return alert('❌ Email introuvable');
+    if (user.isBanned) return alert('❌ Compte banni');
+    this.currentUser = { id: user.id, username: user.username, email: user.email, isAdmin: user.isAdmin };
+    this.save();
+    this.render();
+  },
 
-// ========== REQUESTS ==========
-function addRequest(type, message) {
-  if (!type || !message) {
-    alert('⚠️ Remplis tous les champs');
-    return;
-  }
-  const id = 'req_' + Date.now();
-  DB.requests[id] = {
-    id,
-    user: DB.currentUser.username,
-    userId: DB.currentUser.id,
-    type,
-    message,
-    responses: {},
-    timestamp: Date.now()
-  };
-  saveDB();
-  addNotification(`✨ ${DB.currentUser.username} : ${type}`);
-  render();
-}
+  logout() {
+    this.currentUser = null;
+    this.save();
+    this.render();
+  },
 
-function respondToRequest(requestId, response, customText = null) {
-  DB.requests[requestId].responses[DB.currentUser.id] = {
-    user: DB.currentUser.username,
-    response,
-    customText,
-    timestamp: Date.now()
-  };
-  saveDB();
-  addNotification(`👍 ${DB.currentUser.username} a répondu`);
-  render();
-}
+  addRequest(type, msg) {
+    if (!type || !msg) return alert('⚠️ Remplis tous les champs');
+    const id = 'r' + Date.now();
+    this.requests[id] = { id, user: this.currentUser.username, userId: this.currentUser.id, type, msg, responses: {}, time: Date.now() };
+    this.save();
+    this.notify(`✨ ${this.currentUser.username}: ${type}`);
+  },
 
-function deleteRequest(id) {
-  delete DB.requests[id];
-  saveDB();
-  render();
-}
+  respondRequest(reqId, response, custom = null) {
+    this.requests[reqId].responses[this.currentUser.id] = { user: this.currentUser.username, response, custom, time: Date.now() };
+    this.save();
+    this.notify(`👍 ${this.currentUser.username} a répondu`);
+    this.render();
+  },
 
-// ========== EVENTS ==========
-function addEvent(title, date, time) {
-  if (!title || !date || !time) {
-    alert('⚠️ Remplis tous les champs');
-    return;
-  }
-  const id = 'evt_' + Date.now();
-  DB.events[id] = {
-    id, title, date, time,
-    attendees: {},
-    createdBy: DB.currentUser.id,
-    timestamp: Date.now()
-  };
-  saveDB();
-  addNotification(`📅 ${title}`);
-  render();
-}
+  deleteRequest(id) {
+    delete this.requests[id];
+    this.save();
+    this.render();
+  },
 
-function joinEvent(eventId) {
-  if (!DB.events[eventId].attendees[DB.currentUser.id]) {
-    DB.events[eventId].attendees[DB.currentUser.id] = {
-      username: DB.currentUser.username,
-      timestamp: Date.now()
-    };
-    saveDB();
-    addNotification(`🎉 ${DB.currentUser.username} participe !`);
-    render();
-  }
-}
+  addEvent(title, date, time) {
+    if (!title || !date || !time) return alert('⚠️ Remplis tous les champs');
+    const id = 'e' + Date.now();
+    this.events[id] = { id, title, date, time, attendees: {}, createdBy: this.currentUser.id };
+    this.save();
+    this.notify(`📅 ${title}`);
+  },
 
-function deleteEvent(id) {
-  delete DB.events[id];
-  saveDB();
-  render();
-}
+  joinEvent(eventId) {
+    if (!this.events[eventId].attendees[this.currentUser.id]) {
+      this.events[eventId].attendees[this.currentUser.id] = this.currentUser.username;
+      this.save();
+      this.notify(`🎉 ${this.currentUser.username} participe!`);
+    }
+  },
 
-// ========== MESSAGES ==========
-function sendMessage(recipientId, text) {
-  if (!text.trim()) return;
-  const key = [DB.currentUser.id, recipientId].sort().join('_');
-  if (!DB.messages[key]) DB.messages[key] = [];
-  DB.messages[key].push({
-    from: DB.currentUser.id,
-    fromName: DB.currentUser.username,
-    text,
-    timestamp: Date.now()
-  });
-  saveDB();
-  addNotification(`💬 Message de ${DB.currentUser.username}`);
-  render();
-}
+  deleteEvent(id) {
+    delete this.events[id];
+    this.save();
+    this.render();
+  },
 
-function getMessages(otherId) {
-  const key = [DB.currentUser.id, otherId].sort().join('_');
-  return DB.messages[key] || [];
-}
+  sendMessage(toId, text) {
+    if (!text.trim()) return;
+    const key = [this.currentUser.id, toId].sort().join('_');
+    if (!this.messages[key]) this.messages[key] = [];
+    this.messages[key].push({ from: this.currentUser.id, fromName: this.currentUser.username, text, time: Date.now() });
+    this.save();
+    this.notify(`💬 Message de ${this.currentUser.username}`);
+  },
 
-// ========== ADMIN ==========
-function adminLogin(password) {
-  if (password !== 'admin123') {
-    alert('❌ Mot de passe incorrect');
-    return;
-  }
-  DB.users[DB.currentUser.id].isAdmin = true;
-  DB.currentUser.isAdmin = true;
-  saveDB();
-  addNotification('⚙️ Mode admin activé');
-  render();
-}
+  getMessages(otherId) {
+    const key = [this.currentUser.id, otherId].sort().join('_');
+    return this.messages[key] || [];
+  },
 
-function promoteToAdmin(userId) {
-  DB.users[userId].isAdmin = true;
-  saveDB();
-  addNotification(`👑 ${DB.users[userId].username} est admin`);
-  render();
-}
+  adminLogin(pwd) {
+    if (pwd !== 'admin123') return alert('❌ Mot de passe incorrect');
+    this.users[this.currentUser.id].isAdmin = true;
+    this.currentUser.isAdmin = true;
+    this.save();
+    this.notify('⚙️ Mode admin activé');
+  },
 
-function removeAdmin(userId) {
-  DB.users[userId].isAdmin = false;
-  saveDB();
-  render();
-}
+  promoteAdmin(userId) {
+    this.users[userId].isAdmin = true;
+    this.save();
+    this.notify(`👑 ${this.users[userId].username} est admin`);
+  },
 
-function banUser(userId) {
-  DB.users[userId].isBanned = true;
-  saveDB();
-  addNotification(`🚫 ${DB.users[userId].username} banni`);
-  render();
-}
+  removeAdmin(userId) {
+    this.users[userId].isAdmin = false;
+    this.save();
+    this.notify(`👤 ${this.users[userId].username} n'est plus admin`);
+  },
 
-function unbanUser(userId) {
-  DB.users[userId].isBanned = false;
-  saveDB();
-  render();
-}
+  banUser(userId) {
+    this.users[userId].isBanned = true;
+    this.save();
+    this.notify(`🚫 ${this.users[userId].username} banni`);
+  },
 
-// ========== RENDER ==========
-function render() {
-  const app = document.getElementById('app');
-  
-  if (!DB.currentUser) {
-    app.innerHTML = renderAuth();
-    attachAuthListeners();
-  } else {
-    app.innerHTML = renderApp();
-    attachAppListeners();
-  }
-}
+  unbanUser(userId) {
+    this.users[userId].isBanned = false;
+    this.save();
+    this.notify(`✅ ${this.users[userId].username} débanni`);
+  },
 
-function renderAuth() {
-  return `
-    <div class="min-h-screen bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400 flex items-center justify-center p-4">
-      <div class="bg-white/95 backdrop-blur-2xl rounded-3xl shadow-2xl p-8 w-full max-w-md border border-white/20 animate-slideIn">
-        <div class="text-center mb-8">
-          <div class="w-24 h-24 bg-gradient-to-br from-purple-600 to-pink-500 rounded-3xl flex items-center justify-center text-white font-black text-4xl shadow-xl mx-auto mb-4">🎉</div>
-          <h1 class="text-5xl font-black bg-gradient-to-r from-purple-600 via-pink-500 to-orange-500 bg-clip-text text-transparent mb-2">App Potes</h1>
-          <p class="text-gray-600 font-bold text-lg">Connecte-toi ! 🚀</p>
-        </div>
+  render() {
+    const root = document.getElementById('root');
+    if (!this.currentUser) {
+      root.innerHTML = this.renderAuth();
+    } else {
+      root.innerHTML = this.renderApp();
+      this.attachListeners();
+    }
+  },
 
-        <div id="authTabs" class="flex gap-2 mb-6 p-1 bg-gray-100 rounded-2xl">
-          <button onclick="switchTab('login')" class="flex-1 py-4 rounded-xl font-bold bg-gradient-to-r from-purple-600 to-pink-500 text-white tab-btn" data-tab="login">Connexion</button>
-          <button onclick="switchTab('signup')" class="flex-1 py-4 rounded-xl font-bold text-gray-600 tab-btn" data-tab="signup">Inscription</button>
-        </div>
-
-        <div id="loginForm" class="space-y-4 auth-form">
-          <input type="email" id="loginEmail" placeholder="📧 Email" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none text-lg">
-          <input type="password" id="loginPassword" placeholder="🔒 Mot de passe" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none text-lg">
-          <button onclick="doLogin()" class="w-full bg-gradient-to-r from-purple-600 via-pink-500 to-orange-500 text-white py-5 rounded-xl font-black text-lg hover:shadow-2xl">🚀 Se connecter</button>
-        </div>
-
-        <div id="signupForm" class="space-y-4 auth-form hidden">
-          <input type="text" id="signupUsername" placeholder="✨ Pseudo" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none text-lg">
-          <input type="email" id="signupEmail" placeholder="📧 Email" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none text-lg">
-          <input type="password" id="signupPassword" placeholder="🔒 Mot de passe" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none text-lg">
-          <button onclick="doSignUp()" class="w-full bg-gradient-to-r from-purple-600 via-pink-500 to-orange-500 text-white py-5 rounded-xl font-black text-lg hover:shadow-2xl">✨ Créer mon compte</button>
-        </div>
-      </div>
-    </div>
-  `;
-}
-
-function renderApp() {
-  const requests = Object.values(DB.requests).sort((a, b) => b.timestamp - a.timestamp);
-  const events = Object.values(DB.events).sort((a, b) => new Date(a.date) - new Date(b.date));
-  const notifs = DB.notifications.sort((a, b) => b.timestamp - a.timestamp);
-
-  return `
-    <div class="min-h-screen bg-gradient-to-br from-purple-50 via-pink-50 to-orange-50 pb-24">
-      <!-- HEADER -->
-      <header class="bg-white/95 backdrop-blur-xl shadow-xl sticky top-0 z-30 border-b-2 border-purple-100">
-        <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <div class="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-500 rounded-2xl flex items-center justify-center text-white font-black text-lg">
-              ${DB.currentUser.username[0].toUpperCase()}
-            </div>
-            <div>
-              <h2 class="font-black text-gray-800">${DB.currentUser.username}</h2>
-              <p class="text-xs text-gray-500">${DB.currentUser.email}</p>
-            </div>
-            ${DB.currentUser.isAdmin ? '<div class="ml-2 bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full font-black text-xs">👑 Admin</div>' : ''}
-          </div>
-          <div class="flex gap-2">
-            <button onclick="openTab('messages')" class="p-3 hover:bg-blue-100 rounded-xl">💬</button>
-            <button onclick="openTab('admin')" class="p-3 hover:bg-purple-100 rounded-xl">⚙️</button>
-            <button onclick="logout()" class="p-3 hover:bg-red-100 rounded-xl">🚪</button>
-          </div>
-        </div>
-      </header>
-
-      <!-- TABS NAV -->
-      <nav class="bg-white/95 backdrop-blur-xl border-b-2 border-purple-100 sticky top-[88px] z-20">
-        <div class="max-w-7xl mx-auto px-4 flex">
-          <button onclick="openTab('requests')" class="tab-nav flex-1 py-5 font-black" data-tab="requests">⚡ Demandes</button>
-          <button onclick="openTab('events')" class="tab-nav flex-1 py-5 font-black" data-tab="events">📅 Événements</button>
-          <button onclick="openTab('notifications')" class="tab-nav flex-1 py-5 font-black" data-tab="notifications">🔔 Notifs <span class="bg-red-500 text-white text-xs rounded-full w-6 h-6 inline-flex items-center justify-center">${notifs.length}</span></button>
-        </div>
-      </nav>
-
-      <!-- CONTENT -->
-      <main class="max-w-7xl mx-auto p-4">
-        <!-- REQUESTS TAB -->
-        <div id="requestsTab" class="tab-content space-y-6">
-          <div class="bg-gradient-to-br from-purple-500 to-pink-500 rounded-3xl p-6 shadow-2xl text-white">
-            <h3 class="font-black text-2xl mb-4">✨ Nouvelle Demande</h3>
-            <div class="grid grid-cols-2 gap-3 mb-4">
-              ${['🎮 Jouer', '🍕 Manger', '🎬 Ciné', '⚽ Sport', '🎉 Sortir', '💪 Fitness', '🎵 Concert', '☕ Café'].map(t => 
-                `<button onclick="selectType('${t}')" class="type-btn p-4 rounded-2xl font-bold bg-white/20 hover:bg-white hover:text-purple-600" data-type="${t}">${t}</button>`
-              ).join('')}
-            </div>
-            <textarea id="requestMsg" placeholder="💬 Décris ta demande..." class="w-full px-4 py-4 rounded-2xl bg-white/10 text-white placeholder-white/60 font-medium border-2 border-white/20 focus:border-white outline-none resize-none" rows="3"></textarea>
-            <button onclick="doAddRequest()" class="w-full mt-4 bg-white text-purple-600 py-4 rounded-2xl font-black hover:shadow-2xl">📤 Envoyer</button>
+  renderAuth() {
+    return `
+      <div class="min-h-screen bg-gradient-to-br from-purple-600 via-pink-500 to-orange-400 flex items-center justify-center p-4">
+        <div class="bg-white/95 rounded-3xl p-8 w-full max-w-md shadow-2xl">
+          <div class="text-center mb-8">
+            <div class="text-6xl mb-4">🎉</div>
+            <h1 class="text-4xl font-black bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">App Potes</h1>
+            <p class="text-gray-600 font-bold mt-2">Connecte-toi ! 🚀</p>
           </div>
 
-          <div class="space-y-4">
-            ${requests.length === 0 ? '<div class="bg-white rounded-3xl p-12 text-center shadow-xl"><p class="text-gray-500 font-bold">Aucune demande 📭</p></div>' : 
-              requests.map(req => `
-                <div class="bg-white rounded-3xl p-6 shadow-xl border-2 border-purple-100 animate-slideIn">
-                  <div class="flex justify-between items-start mb-4">
-                    <div class="flex gap-3">
-                      <div class="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-500 rounded-2xl flex items-center justify-center text-white font-black">${req.user[0]}</div>
-                      <div>
-                        <h4 class="font-black text-gray-800">${req.user}</h4>
-                        <span class="text-sm font-bold text-purple-600">${req.type}</span>
-                      </div>
-                    </div>
-                    ${DB.currentUser.isAdmin ? `<button onclick="deleteRequest('${req.id}')" class="text-red-600 hover:bg-red-100 p-2 rounded">🗑️</button>` : ''}
-                  </div>
-                  <p class="text-gray-700 font-medium mb-4 bg-gray-50 p-4 rounded-2xl">${req.message}</p>
-                  <div class="flex gap-3 mb-3">
-                    <button onclick="respondRequest('${req.id}', 'yes')" class="flex-1 bg-gradient-to-r from-green-500 to-emerald-500 text-white py-4 rounded-2xl font-black">✅ Chaud!</button>
-                    <button onclick="respondRequest('${req.id}', 'no')" class="flex-1 bg-gradient-to-r from-red-500 to-pink-500 text-white py-4 rounded-2xl font-black">❌ Pas dispo</button>
-                  </div>
-                  <button onclick="openCustomResponse('${req.id}')" class="w-full bg-gradient-to-r from-blue-500 to-purple-500 text-white py-4 rounded-2xl font-black">💬 Réponse perso</button>
-                  ${Object.keys(req.responses).length > 0 ? `
-                    <div class="mt-4 pt-4 border-t-2 border-gray-100">
-                      <p class="font-bold text-gray-500 mb-2">Réponses (${Object.keys(req.responses).length})</p>
-                      ${Object.values(req.responses).map(r => `
-                        <div class="bg-gray-50 p-3 rounded-xl mb-2">
-                          <div class="font-bold text-gray-700">${r.user}</div>
-                          ${r.response !== 'custom' ? `<span class="inline-block mt-1 px-3 py-1 rounded-full text-sm font-bold ${r.response === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${r.response === 'yes' ? '✅ Chaud' : '❌ Non'}</span>` : ''}
-                          ${r.customText ? `<p class="text-gray-600 mt-2 bg-blue-50 p-2 rounded border-l-4 border-blue-400">💬 ${r.customText}</p>` : ''}
-                        </div>
-                      `).join('')}
-                    </div>
-                  ` : ''}
-                </div>
-              `).join('')
-            }
-          </div>
-        </div>
-
-        <!-- EVENTS TAB -->
-        <div id="eventsTab" class="tab-content space-y-6 hidden">
-          <div class="bg-gradient-to-br from-pink-500 to-orange-500 rounded-3xl p-6 shadow-2xl text-white">
-            <h3 class="font-black text-2xl mb-4">📅 Nouvel Événement</h3>
-            <input type="text" id="eventTitle" placeholder="🎉 Titre" class="w-full px-4 py-4 rounded-2xl mb-3 bg-white/10 text-white placeholder-white/60 border-2 border-white/20 outline-none">
-            <div class="flex gap-3 mb-3">
-              <input type="date" id="eventDate" class="flex-1 px-4 py-4 rounded-2xl bg-white/10 text-white border-2 border-white/20 outline-none">
-              <input type="time" id="eventTime" class="flex-1 px-4 py-4 rounded-2xl bg-white/10 text-white border-2 border-white/20 outline-none">
-            </div>
-            <button onclick="doAddEvent()" class="w-full bg-white text-pink-600 py-4 rounded-2xl font-black">➕ Créer</button>
+          <div id="authTabs" class="flex gap-2 mb-6 bg-gray-100 p-1 rounded-2xl">
+            <button onclick="app.switchAuth('login')" class="flex-1 py-3 rounded-xl font-bold auth-tab active bg-purple-500 text-white" data-tab="login">Connexion</button>
+            <button onclick="app.switchAuth('signup')" class="flex-1 py-3 rounded-xl font-bold auth-tab" data-tab="signup">Inscription</button>
           </div>
 
-          <div class="space-y-4">
-            ${events.length === 0 ? '<div class="bg-white rounded-3xl p-12 text-center"><p class="text-gray-500 font-bold">Aucun événement 📭</p></div>' :
-              events.map(evt => `
-                <div class="bg-white rounded-3xl p-6 shadow-xl border-2 border-pink-100 animate-slideIn">
-                  <div class="flex justify-between items-start mb-3">
-                    <div>
-                      <h4 class="font-black text-2xl text-gray-800">${evt.title}</h4>
-                      <div class="flex gap-3 mt-2">
-                        <span class="bg-pink-50 px-3 py-1 rounded-xl font-bold">${new Date(evt.date).toLocaleDateString('fr-FR')}</span>
-                        <span class="bg-orange-50 px-3 py-1 rounded-xl font-bold">🕒 ${evt.time}</span>
-                      </div>
-                    </div>
-                    ${DB.currentUser.isAdmin ? `<button onclick="deleteEvent('${evt.id}')" class="text-red-600 hover:bg-red-100 p-2 rounded">🗑️</button>` : ''}
-                  </div>
-                  <button onclick="joinEvent('${evt.id}')" class="w-full ${evt.attendees[DB.currentUser.id] ? 'bg-green-100 text-green-700' : 'bg-gradient-to-r from-pink-500 to-orange-500 text-white'} py-4 rounded-2xl font-black">
-                    ${evt.attendees[DB.currentUser.id] ? '✅ Tu participes!' : '➕ Je participe!'}
-                  </button>
-                  ${Object.keys(evt.attendees).length > 0 ? `
-                    <div class="mt-4 pt-4 border-t-2 border-gray-100">
-                      <p class="font-bold text-gray-500 mb-2">Participants (${Object.keys(evt.attendees).length})</p>
-                      <div class="flex flex-wrap gap-2">
-                        ${Object.values(evt.attendees).map(a => `<span class="bg-pink-100 text-pink-700 px-4 py-2 rounded-full font-bold">${a.username}</span>`).join('')}
-                      </div>
-                    </div>
-                  ` : ''}
-                </div>
-              `).join('')
-            }
+          <div id="loginForm" class="space-y-4">
+            <input type="email" id="loginEmail" placeholder="📧 Email" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl outline-none focus:border-purple-500">
+            <input type="password" id="loginPassword" placeholder="🔒 Mot de passe" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl outline-none focus:border-purple-500">
+            <button onclick="app.doSignIn()" class="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-4 rounded-xl font-black">🚀 Connexion</button>
           </div>
-        </div>
 
-        <!-- NOTIFICATIONS TAB -->
-        <div id="notificationsTab" class="tab-content space-y-4 hidden">
-          ${notifs.length === 0 ? '<div class="bg-white rounded-3xl p-12 text-center"><p class="text-gray-500 font-bold">Aucune notification 🔔</p></div>' :
-            notifs.map(n => `
-              <div class="bg-white rounded-2xl p-5 shadow-lg border-l-4 border-orange-500 animate-slideIn">
-                <div class="flex justify-between items-center">
-                  <p class="text-gray-800 font-bold">${n.message}</p>
-                  <span class="text-sm text-gray-500">${n.time}</span>
-                </div>
-              </div>
-            `).join('')
-          }
-        </div>
-      </main>
-
-      <!-- MODALS -->
-      <!-- MESSAGES MODAL -->
-      <div id="messagesModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-3xl w-full max-w-2xl h-[80vh] flex flex-col shadow-2xl animate-slideIn">
-          <div class="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-6 rounded-t-3xl flex justify-between items-center">
-            <h3 class="text-2xl font-black">💬 Messages</h3>
-            <button onclick="closeModal('messagesModal')" class="p-2 hover:bg-white/20 rounded">✕</button>
-          </div>
-          <div class="flex flex-1 overflow-hidden">
-            <div class="w-1/3 border-r bg-gray-50 overflow-y-auto">
-              ${Object.entries(DB.users).filter(([id]) => id !== DB.currentUser.id).map(([userId, user]) => `
-                <button onclick="selectChatUser('${userId}')" class="w-full text-left p-4 border-b hover:bg-blue-100 chat-user" data-user="${userId}">
-                  <p class="font-bold">${user.username}</p>
-                  <p class="text-sm text-gray-500">${user.email}</p>
-                </button>
-              `).join('')}
-            </div>
-            <div class="w-2/3 flex flex-col">
-              <div id="messagesArea" class="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50"></div>
-              <div class="border-t p-4 flex gap-2">
-                <input type="text" id="messageInput" placeholder="Écris..." class="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl outline-none">
-                <button onclick="doSendMessage()" class="bg-blue-500 text-white p-3 rounded-xl font-bold">📤</button>
-              </div>
-            </div>
+          <div id="signupForm" class="space-y-4 hidden">
+            <input type="text" id="signupUsername" placeholder="✨ Pseudo" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl outline-none focus:border-purple-500">
+            <input type="email" id="signupEmail" placeholder="📧 Email" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl outline-none focus:border-purple-500">
+            <input type="password" id="signupPassword" placeholder="🔒 Mot de passe" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl outline-none focus:border-purple-500">
+            <button onclick="app.doSignUp()" class="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-4 rounded-xl font-black">✨ Créer</button>
           </div>
         </div>
       </div>
+    `;
+  },
 
-      <!-- ADMIN MODAL -->
-      <div id="adminModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-3xl p-8 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto animate-slideIn">
-          <h3 class="text-3xl font-black mb-6 text-purple-600">⚙️ Admin Panel</h3>
-          ${!DB.currentUser.isAdmin ? `
+  renderApp() {
+    const reqs = Object.values(this.requests).sort((a, b) => b.time - a.time);
+    const evts = Object.values(this.events).sort((a, b) => new Date(a.date) - new Date(b.date));
+    const notifs = this.notifications.slice(0, 50);
+
+    return `
+      <div class="min-h-screen pb-24">
+        <!-- HEADER -->
+        <header class="bg-white/95 shadow-xl sticky top-0 z-30 border-b-2 border-purple-100">
+          <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+              <div class="w-12 h-12 bg-gradient-to-br from-purple-600 to-pink-500 rounded-2xl flex items-center justify-center text-white font-black">${this.currentUser.username[0].toUpperCase()}</div>
+              <div>
+                <h2 class="font-black text-gray-800">${this.currentUser.username}</h2>
+                <p class="text-xs text-gray-500">${this.currentUser.email}</p>
+              </div>
+              ${this.currentUser.isAdmin ? '<span class="ml-3 bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full font-black text-xs">👑 Admin</span>' : ''}
+            </div>
+            <div class="flex gap-2">
+              <button onclick="app.openModal('messages')" class="p-3 hover:bg-blue-100 rounded-xl text-lg">💬</button>
+              <button onclick="app.openModal('admin')" class="p-3 hover:bg-purple-100 rounded-xl text-lg">⚙️</button>
+              <button onclick="app.logout()" class="p-3 hover:bg-red-100 rounded-xl text-lg">🚪</button>
+            </div>
+          </div>
+        </header>
+
+        <!-- NAV TABS -->
+        <nav class="bg-white/95 border-b-2 border-purple-100 sticky top-[88px] z-20">
+          <div class="max-w-7xl mx-auto px-4 flex">
+            <button onclick="app.selectedTab='requests'; app.render()" class="tab-nav flex-1 py-4 font-black ${this.selectedTab === 'requests' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-500'}">⚡ Demandes</button>
+            <button onclick="app.selectedTab='events'; app.render()" class="tab-nav flex-1 py-4 font-black ${this.selectedTab === 'events' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-500'}">📅 Événements</button>
+            <button onclick="app.selectedTab='notifications'; app.render()" class="tab-nav flex-1 py-4 font-black ${this.selectedTab === 'notifications' ? 'text-purple-600 border-b-2 border-purple-600' : 'text-gray-500'}">🔔 Notifs ${notifs.length > 0 ? `<span class="inline-block ml-1 bg-red-500 text-white text-xs rounded-full w-5 h-5">${notifs.length}</span>` : ''}</button>
+          </div>
+        </nav>
+
+        <!-- CONTENT -->
+        <main class="max-w-7xl mx-auto p-4">
+          <!-- REQUESTS -->
+          ${this.selectedTab === 'requests' ? `
+            <div class="bg-gradient-to-br from-purple-500 to-pink-500 rounded-3xl p-6 text-white mb-6 shadow-2xl">
+              <h3 class="font-black text-2xl mb-4">✨ Nouvelle Demande</h3>
+              <div class="grid grid-cols-2 gap-3 mb-4">
+                ${['🎮 Jouer', '🍕 Manger', '🎬 Ciné', '⚽ Sport', '🎉 Sortir', '💪 Fitness', '🎵 Concert', '☕ Café'].map(t => 
+                  `<button onclick="app.selectType('${t}')" class="type-btn p-3 rounded-xl font-bold ${this.selectedType === t ? 'bg-white text-purple-600' : 'bg-white/20'}">${t}</button>`
+                ).join('')}
+              </div>
+              <textarea id="reqMsg" placeholder="💬 Décris..." class="w-full px-4 py-4 rounded-xl bg-white/10 text-white placeholder-white/60 border-2 border-white/20 outline-none" rows="3"></textarea>
+              <button onclick="app.doAddRequest()" class="w-full mt-4 bg-white text-purple-600 py-4 rounded-xl font-black">📤 Envoyer</button>
+            </div>
+
             <div class="space-y-4">
-              <input type="password" id="adminPassword" placeholder="🔑 Mot de passe" class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl outline-none">
-              <button onclick="doAdminLogin()" class="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-4 rounded-xl font-black">🔓 Se connecter</button>
-            </div>
-          ` : `
-            <div class="bg-green-50 border-2 border-green-300 rounded-xl p-6 mb-6">
-              <p class="text-green-700 font-black text-center">✅ Mode admin activé</p>
-            </div>
-            <div class="space-y-3">
-              ${Object.entries(DB.users).map(([userId, user]) => `
-                <div class="bg-gray-50 p-4 rounded-2xl border-2 border-gray-200">
-                  <div class="flex justify-between items-center mb-3">
-                    <div>
-                      <p class="font-black">${user.username}</p>
-                      <p class="text-sm text-gray-500">${user.email}</p>
+              ${reqs.length === 0 ? '<div class="bg-white rounded-3xl p-12 text-center">Aucune demande 📭</div>' :
+                reqs.map(req => `
+                  <div class="bg-white rounded-3xl p-6 shadow-xl border-2 border-purple-100">
+                    <div class="flex justify-between items-start mb-3">
+                      <div class="flex gap-3">
+                        <div class="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-500 rounded-xl flex items-center justify-center text-white font-black text-sm">${req.user[0]}</div>
+                        <div>
+                          <p class="font-black text-gray-800">${req.user}</p>
+                          <p class="text-sm text-purple-600">${req.type}</p>
+                        </div>
+                      </div>
+                      ${this.currentUser.isAdmin ? `<button onclick="app.deleteRequest('${req.id}')" class="text-red-600 text-lg">🗑️</button>` : ''}
                     </div>
-                    <div class="flex gap-1">
-                      ${user.isAdmin ? '<span class="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-black">👑 Admin</span>' : ''}
-                      ${user.isBanned ? '<span class="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-black">🚫 Banni</span>' : ''}
+                    <p class="text-gray-700 mb-4 bg-gray-50 p-3 rounded-xl">${req.msg}</p>
+                    <div class="flex gap-2 mb-2">
+                      <button onclick="app.respondRequest('${req.id}', 'yes')" class="flex-1 bg-green-500 text-white py-3 rounded-xl font-black">✅ Chaud!</button>
+                      <button onclick="app.respondRequest('${req.id}', 'no')" class="flex-1 bg-red-500 text-white py-3 rounded-xl font-black">❌ Non</button>
+                    </div>
+                    <button onclick="app.openCustomResp('${req.id}')" class="w-full bg-blue-500 text-white py-3 rounded-xl font-black">💬 Perso</button>
+                    ${Object.keys(req.responses).length > 0 ? `
+                      <div class="mt-4 pt-4 border-t-2 border-gray-200">
+                        <p class="font-bold text-gray-600 mb-2">Réponses (${Object.keys(req.responses).length})</p>
+                        ${Object.values(req.responses).map(r => `
+                          <div class="bg-gray-50 p-3 rounded-lg mb-2">
+                            <p class="font-bold text-gray-700">${r.user}</p>
+                            ${r.response !== 'custom' ? `<span class="inline-block mt-1 text-xs font-bold px-2 py-1 rounded ${r.response === 'yes' ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">${r.response === 'yes' ? '✅ Chaud' : '❌ Non'}</span>` : ''}
+                            ${r.custom ? `<p class="mt-2 text-gray-700 bg-blue-50 p-2 rounded border-l-4 border-blue-400">💬 ${r.custom}</p>` : ''}
+                          </div>
+                        `).join('')}
+                      </div>
+                    ` : ''}
+                  </div>
+                `).join('')
+              }
+            </div>
+          ` : ''}
+
+          <!-- EVENTS -->
+          ${this.selectedTab === 'events' ? `
+            <div class="bg-gradient-to-br from-pink-500 to-orange-500 rounded-3xl p-6 text-white mb-6 shadow-2xl">
+              <h3 class="font-black text-2xl mb-4">📅 Nouvel Événement</h3>
+              <input type="text" id="evtTitle" placeholder="Titre" class="w-full px-4 py-3 rounded-xl mb-3 bg-white/10 text-white placeholder-white/60 border-2 border-white/20 outline-none">
+              <div class="flex gap-3 mb-3">
+                <input type="date" id="evtDate" class="flex-1 px-4 py-3 rounded-xl bg-white/10 text-white border-2 border-white/20 outline-none">
+                <input type="time" id="evtTime" class="flex-1 px-4 py-3 rounded-xl bg-white/10 text-white border-2 border-white/20 outline-none">
+              </div>
+              <button onclick="app.doAddEvent()" class="w-full bg-white text-pink-600 py-4 rounded-xl font-black">➕ Créer</button>
+            </div>
+
+            <div class="space-y-4">
+              ${evts.length === 0 ? '<div class="bg-white rounded-3xl p-12 text-center">Aucun événement 📭</div>' :
+                evts.map(evt => `
+                  <div class="bg-white rounded-3xl p-6 shadow-xl border-2 border-pink-100">
+                    <div class="flex justify-between items-start mb-3">
+                      <div>
+                        <h4 class="font-black text-xl text-gray-800">${evt.title}</h4>
+                        <div class="flex gap-2 mt-2">
+                          <span class="bg-pink-50 px-3 py-1 rounded-xl text-sm font-bold">${new Date(evt.date).toLocaleDateString('fr-FR')}</span>
+                          <span class="bg-orange-50 px-3 py-1 rounded-xl text-sm font-bold">🕒 ${evt.time}</span>
+                        </div>
+                      </div>
+                      ${this.currentUser.isAdmin ? `<button onclick="app.deleteEvent('${evt.id}')" class="text-red-600 text-lg">🗑️</button>` : ''}
+                    </div>
+                    <button onclick="app.joinEvent('${evt.id}')" class="w-full py-3 rounded-xl font-black ${evt.attendees[this.currentUser.id] ? 'bg-green-100 text-green-700' : 'bg-pink-500 text-white'}">${evt.attendees[this.currentUser.id] ? '✅ Tu participes' : '➕ Je participe'}</button>
+                    ${Object.keys(evt.attendees).length > 0 ? `
+                      <div class="mt-4 pt-4 border-t-2 border-gray-200">
+                        <p class="font-bold text-gray-600 mb-2">Participants (${Object.keys(evt.attendees).length})</p>
+                        <div class="flex flex-wrap gap-2">
+                          ${Object.values(evt.attendees).map(a => `<span class="bg-pink-100 text-pink-700 px-3 py-1 rounded-full text-sm font-bold">${a}</span>`).join('')}
+                        </div>
+                      </div>
+                    ` : ''}
+                  </div>
+                `).join('')
+              }
+            </div>
+          ` : ''}
+
+          <!-- NOTIFICATIONS -->
+          ${this.selectedTab === 'notifications' ? `
+            <div class="space-y-3">
+              ${notifs.length === 0 ? '<div class="bg-white rounded-3xl p-12 text-center">Aucune notification 🔔</div>' :
+                notifs.map(n => `
+                  <div class="bg-white rounded-2xl p-4 shadow-lg border-l-4 border-orange-500">
+                    <div class="flex justify-between items-center">
+                      <p class="font-bold text-gray-800">${n.msg}</p>
+                      <span class="text-xs text-gray-500">${n.time}</span>
                     </div>
                   </div>
-                  ${userId !== DB.currentUser.id ? `
-                    <div class="flex gap-2 flex-wrap">
-                      ${!user.isAdmin ? `<button onclick="promoteToAdmin('${userId}')" class="flex-1 bg-yellow-500 text-white py-2 px-3 rounded-xl text-sm font-bold">👑 Admin</button>` : `<button onclick="removeAdmin('${userId}')" class="flex-1 bg-gray-400 text-white py-2 px-3 rounded-xl text-sm font-bold">Retirer</button>`}
-                      ${!user.isBanned ? `<button onclick="banUser('${userId}')" class="flex-1 bg-red-500 text-white py-2 px-3 rounded-xl text-sm font-bold">🚫 Bannir</button>` : `<button onclick="unbanUser('${userId}')" class="flex-1 bg-green-500 text-white py-2 px-3 rounded-xl text-sm font-bold">✅ Débannir</button>`}
-                    </div>
-                  ` : ''}
-                </div>
-              `).join('')}
+                `).join('')
+              }
             </div>
-          `}
-          <button onclick="closeModal('adminModal')" class="w-full mt-6 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold">Fermer</button>
-        </div>
-      </div>
+          ` : ''}
+        </main>
 
-      <!-- CUSTOM RESPONSE MODAL -->
-      <div id="customResponseModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4">
-        <div class="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl animate-slideIn">
-          <h3 class="text-2xl font-black mb-4 text-purple-600">💬 Réponse personnalisée</h3>
-          <textarea id="customResponseText" placeholder="Écris ta réponse..." class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl outline-none resize-none font-medium" rows="4"></textarea>
-          <div class="flex gap-3 mt-4">
-            <button onclick="closeModal('customResponseModal')" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold">Annuler</button>
-            <button onclick="doCustomResponse()" class="flex-1 bg-gradient-to-r from-purple-600 to-pink-500 text-white py-4 rounded-xl font-black">Envoyer</button>
+        <!-- MESSAGES MODAL -->
+        <div id="messagesModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-3xl w-full max-w-2xl h-[80vh] flex flex-col shadow-2xl">
+            <div class="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-4 rounded-t-3xl flex justify-between">
+              <h3 class="font-black text-xl">💬 Messages</h3>
+              <button onclick="app.closeModal('messagesModal')" class="text-lg">✕</button>
+            </div>
+            <div class="flex flex-1 overflow-hidden">
+              <div class="w-1/3 border-r bg-gray-50 overflow-y-auto">
+                ${Object.entries(this.users).filter(([id]) => id !== this.currentUser.id).map(([uid, u]) => 
+                  `<button onclick="app.selectChat('${uid}')" class="w-full text-left p-4 border-b hover:bg-blue-100 ${this.selectedChatUser === uid ? 'bg-blue-100' : ''}">
+                    <p class="font-bold">${u.username}</p>
+                    <p class="text-sm text-gray-500">${u.email}</p>
+                  </button>`
+                ).join('')}
+              </div>
+              <div class="w-2/3 flex flex-col">
+                <div id="messagesArea" class="flex-1 overflow-y-auto p-4 space-y-3 bg-gray-50"></div>
+                <div class="border-t p-4 flex gap-2">
+                  <input type="text" id="msgInput" placeholder="Écris..." class="flex-1 px-4 py-2 border-2 border-gray-200 rounded-xl outline-none">
+                  <button onclick="app.doSendMessage()" class="bg-blue-500 text-white px-4 py-2 rounded-xl font-bold">📤</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ADMIN MODAL -->
+        <div id="adminModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-3xl p-6 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <h3 class="font-black text-2xl text-purple-600 mb-4">⚙️ Admin Panel</h3>
+            ${!this.currentUser.isAdmin ? `
+              <input type="password" id="adminPwd" placeholder="Mot de passe" class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl outline-none mb-3">
+              <button onclick="app.doAdminLogin()" class="w-full bg-purple-600 text-white py-3 rounded-xl font-black">🔓 Connecter</button>
+            ` : `
+              <div class="bg-green-50 border-2 border-green-300 rounded-xl p-4 mb-4">
+                <p class="font-black text-green-700 text-center">✅ Mode admin activé</p>
+              </div>
+              <div class="space-y-3">
+                ${Object.entries(this.users).map(([uid, u]) => `
+                  <div class="bg-gray-50 p-4 rounded-xl border-2 border-gray-200">
+                    <div class="flex justify-between items-center mb-3">
+                      <div>
+                        <p class="font-black">${u.username}</p>
+                        <p class="text-sm text-gray-500">${u.email}</p>
+                      </div>
+                      <div>
+                        ${u.isAdmin ? '<span class="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-black">👑</span>' : ''}
+                        ${u.isBanned ? '<span class="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-black">🚫</span>' : ''}
+                      </div>
+                    </div>
+                    ${uid !== this.currentUser.id ? `
+                      <div class="flex gap-2">
+                        ${!u.isAdmin ? `<button onclick="app.promoteAdmin('${uid}')" class="flex-1 bg-yellow-500 text-white py-2 rounded-lg text-sm font-bold">👑</button>` : `<button onclick="app.removeAdmin('${uid}')" class="flex-1 bg-gray-400 text-white py-2 rounded-lg text-sm font-bold">Retirer</button>`}
+                        ${!u.isBanned ? `<button onclick="app.banUser('${uid}')" class="flex-1 bg-red-500 text-white py-2 rounded-lg text-sm font-bold">🚫</button>` : `<button onclick="app.unbanUser('${uid}')" class="flex-1 bg-green-500 text-white py-2 rounded-lg text-sm font-bold">✅</button>`}
+                      </div>
+                    ` : ''}
+                  </div>
+                `).join('')}
+              </div>
+            `}
+            <button onclick="app.closeModal('adminModal')" class="w-full mt-4 bg-gray-200 py-3 rounded-xl font-bold">Fermer</button>
+          </div>
+        </div>
+
+        <!-- CUSTOM RESPONSE MODAL -->
+        <div id="customModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div class="bg-white rounded-3xl p-6 w-full max-w-md shadow-2xl">
+            <h3 class="font-black text-xl text-purple-600 mb-4">💬 Réponse personnalisée</h3>
+            <textarea id="customText" placeholder="Écris ta réponse..." class="w-full px-4 py-3 border-2 border-gray-200 rounded-xl outline-none resize-none" rows="4"></textarea>
+            <div class="flex gap-3 mt-4">
+              <button onclick="app.closeModal('customModal')" class="flex-1 bg-gray-200 py-3 rounded-xl font-bold">Annuler</button>
+              <button onclick="app.doCustomResp()" class="flex-1 bg-purple-600 text-white py-3 rounded-xl font-black">Envoyer</button>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-  `;
-}
+    `;
+  },
 
-function attachAuthListeners() {
-  document.querySelectorAll('.tab-btn').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-btn').forEach(b => {
-        b.classList.remove('bg-gradient-to-r', 'from-purple-600', 'to-pink-500', 'text-white');
-        b.classList.add('text-gray-600');
-      });
-      btn.classList.add('bg-gradient-to-r', 'from-purple-600', 'to-pink-500', 'text-white');
-      btn.classList.remove('text-gray-600');
-      
-      document.querySelectorAll('.auth-form').forEach(f => f.classList.add('hidden'));
-      const tab = btn.dataset.tab === 'login' ? 'loginForm' : 'signupForm';
-      document.getElementById(tab).classList.remove('hidden');
-    });
-  });
-}
+  attachListeners() {},
 
-function attachAppListeners() {
-  document.querySelectorAll('.tab-nav').forEach(btn => {
-    btn.addEventListener('click', () => {
-      document.querySelectorAll('.tab-nav').forEach(b => b.classList.remove('text-purple-600', 'border-b-2', 'border-purple-600'));
-      btn.classList.add('text-purple-600', 'border-b-2', 'border-purple-600');
-    });
-  });
-}
-
-// ========== EVENT HANDLERS ==========
-function switchTab(tab) {
-  document.querySelectorAll('.tab-btn').forEach(b => {
-    b.classList.remove('bg-gradient-to-r', 'from-purple-600', 'to-pink-500', 'text-white');
-    b.classList.add('text-gray-600');
-  });
-  document.querySelector(`[data-tab="${tab}"]`).classList.add('bg-gradient-to-r', 'from-purple-600', 'to-pink-500', 'text-white');
-  document.querySelectorAll('.auth-form').forEach(f => f.classList.add('hidden'));
-  document.getElementById(`${tab}Form`).classList.remove('hidden');
-}
-
-function doLogin() {
-  const email = document.getElementById('loginEmail').value;
-  const password = document.getElementById('loginPassword').value;
-  handleSignIn(email, password);
-}
-
-function doSignUp() {
-  const username = document.getElementById('signupUsername').value;
-  const email = document.getElementById('signupEmail').value;
-  const password = document.getElementById('signupPassword').value;
-  handleSignUp(email, password, username);
-}
-
-function openTab(tab) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
-  document.getElementById(tab + 'Tab').classList.remove('hidden');
-  
-  document.querySelectorAll('.tab-nav').forEach(b => b.classList.remove('text-purple-600', 'border-b-2', 'border-purple-600'));
-  const tabNames = { requests: '⚡ Demandes', events: '📅 Événements', notifications: '🔔 Notifs' };
-  Array.from(document.querySelectorAll('.tab-nav')).find(b => b.textContent.includes(tabNames[tab])).classList.add('text-purple-600', 'border-b-2', 'border-purple-600');
-}
-
-function selectType(type) {
-  document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('bg-white', 'text-purple-600'));
-  document.querySelector(`[data-type="${type}"]`).classList.add('bg-white', 'text-purple-600');
-  window.selectedType = type;
-}
-
-function doAddRequest() {
-  const msg = document.getElementById('requestMsg').value;
-  addRequest(window.selectedType || '🎮 Jouer', msg);
-  document.getElementById('requestMsg').value = '';
-  window.selectedType = null;
-}
-
-function respondRequest(requestId, response) {
-  respondToRequest(requestId, response);
-}
-
-function openCustomResponse(requestId) {
-  window.customResponseRequestId = requestId;
-  document.getElementById('customResponseModal').classList.remove('hidden');
-}
-
-function doCustomResponse() {
-  const text = document.getElementById('customResponseText').value;
-  if (text.trim()) {
-    respondToRequest(window.customResponseRequestId, 'custom', text);
-    document.getElementById('customResponseText').value = '';
-    closeModal('customResponseModal');
-  }
-}
-
-function doAddEvent() {
-  const title = document.getElementById('eventTitle').value;
-  const date = document.getElementById('eventDate').value;
-  const time = document.getElementById('eventTime').value;
-  addEvent(title, date, time);
-  document.getElementById('eventTitle').value = '';
-  document.getElementById('eventDate').value = '';
-  document.getElementById('eventTime').value = '';
-}
-
-function openTab(tab) {
-  document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
-  if (tab === 'messages') {
-    document.getElementById('messagesModal').classList.remove('hidden');
-  } else if (tab === 'admin') {
-    document.getElementById('adminModal').classList.remove('hidden');
-  } else {
-    document.getElementById(tab + 'Tab').classList.remove('hidden');
-  }
-}
-
-function closeModal(modalId) {
-  document.getElementById(modalId).classList.add('hidden');
-}
-
-function selectChatUser(userId) {
-  window.selectedChatUserId = userId;
-  const msgs = getMessages(userId);
-  const area = document.getElementById('messagesArea');
-  area.innerHTML = msgs.map(m => `
-    <div class="flex ${m.from === DB.currentUser.id ? 'justify-end' : 'justify-start'}">
-      <div class="max-w-xs p-4 rounded-2xl ${m.from === DB.currentUser.id ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border-2 border-gray-200'}">
-        <p class="font-bold text-sm mb-1">${m.fromName}</p>
-        <p>${m.text}</p>
-        <p class="text-xs opacity-70 mt-1">${new Date(m.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
-      </div>
-    </div>
-  `).join('');
-  area.scrollTop = area.scrollHeight;
-}
-
-function doSendMessage() {
-  const text = document.getElementById('messageInput').value;
-  if (text.trim() && window.selectedChatUserId) {
-    sendMessage(window.selectedChatUserId, text);
-    document.getElementById('messageInput').value = '';
-    selectChatUser(window.selectedChatUserId);
-  }
-}
-
-function doAdminLogin() {
-  const password = document.getElementById('adminPassword').value;
-  adminLogin(password);
-  document.getElementById('adminPassword').value = '';
-}
-
-// ========== INIT ==========
-loadDB();
-if ('Notification' in window && Notification.permission === 'default') {
-  Notification.requestPermission();
-}
-render();
-</script>
-
-</body>
-</html>
+  switchAuth(tab) {
+    document.querySelectorAll('.auth-tab').forEach(b => b.classList.remove('bg-purple-500', 'text-white'));
+    document.querySelector(`[data-tab="${tab}"]`).classList.add('bg-purple-500', 'text-white');
+    document.querySelectorAll('[id*="Form"]').forEach(f

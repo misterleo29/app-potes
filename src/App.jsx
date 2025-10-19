@@ -1,15 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { User, Calendar, Bell, Settings, LogOut, Plus, Trash2, Check, X, Sparkles, Users, Clock, Phone, Mic, MicOff, PhoneOff, Send, MessageCircle, Zap, Edit3, UserX, Shield, Crown } from 'lucide-react';
-import { auth, database } from './firebase';
-import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import { ref, push, set, onValue, remove, get, update } from 'firebase/database';
+import { User, Calendar, Bell, Settings, LogOut, Plus, Trash2, Check, X, Sparkles, Users, Clock, Phone, Mic, MicOff, PhoneOff, Send, MessageCircle, Zap, Edit3, UserX, Shield, Crown, Eye, EyeOff } from 'lucide-react';
+
+// Base de données locale en mémoire
+const DB = {
+  users: {},
+  requests: {},
+  events: {},
+  notifications: [],
+  messages: {}
+};
 
 export default function App() {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('requests');
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [adminPassword, setAdminPassword] = useState('');
+  const [showAdminPassword, setShowAdminPassword] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [authMode, setAuthMode] = useState('login');
   const [email, setEmail] = useState('');
@@ -23,220 +30,269 @@ export default function App() {
   const [notifications, setNotifications] = useState([]);
   const [isInCall, setIsInCall] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [showCallModal, setShowCallModal] = useState(false);
   const [showCustomResponseModal, setShowCustomResponseModal] = useState(null);
   const [customResponseText, setCustomResponseText] = useState('');
   const [allUsers, setAllUsers] = useState({});
   const [showUserManagement, setShowUserManagement] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [showMessages, setShowMessages] = useState(false);
+  const [messages, setMessages] = useState({});
+  const [newMessage, setNewMessage] = useState('');
+  const [selectedUser, setSelectedUser] = useState(null);
   const localStreamRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
 
   const requestTypes = ['🎮 Jouer', '🍕 Manger', '🎬 Ciné', '⚽ Sport', '🎉 Sortir', '💪 Fitness', '🎵 Concert', '☕ Café'];
 
+  // Charger les données au démarrage
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      if (currentUser) {
-        const userRef = ref(database, `users/${currentUser.uid}`);
-        const snapshot = await get(userRef);
-        if (snapshot.exists()) {
-          const userData = snapshot.val();
-          setUsername(userData.username);
-          setIsAdmin(userData.isAdmin || false);
+    const saved = localStorage.getItem('appPotesDB');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      Object.assign(DB, parsed);
+    }
+    const savedAuth = localStorage.getItem('appPotesAuth');
+    if (savedAuth) {
+      const auth = JSON.parse(savedAuth);
+      setUser(auth);
+      setUsername(auth.username);
+      setIsAdmin(auth.isAdmin || false);
+      loadAllData();
+    }
+    setLoading(false);
+
+    // Demander permission pour notifications
+    if ('Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission().then(permission => {
+        if (permission === 'granted') {
+          setNotificationsEnabled(true);
         }
-        setUser(currentUser);
-        loadFirebaseData();
-      } else {
-        setUser(null);
-        setIsAdmin(false);
-      }
-      setLoading(false);
-    });
-    return () => unsubscribe();
+      });
+    } else if ('Notification' in window && Notification.permission === 'granted') {
+      setNotificationsEnabled(true);
+    }
   }, []);
 
-  const loadFirebaseData = () => {
-    const requestsRef = ref(database, 'requests');
-    onValue(requestsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const arr = Object.keys(data).map(key => ({ id: key, ...data[key] }));
-        setRequests(arr.sort((a, b) => b.timestamp - a.timestamp));
-      } else {
-        setRequests([]);
-      }
-    });
-
-    const eventsRef = ref(database, 'events');
-    onValue(eventsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const arr = Object.keys(data).map(key => ({ id: key, ...data[key] }));
-        setEvents(arr.sort((a, b) => new Date(a.date) - new Date(b.date)));
-      } else {
-        setEvents([]);
-      }
-    });
-
-    const notificationsRef = ref(database, 'notifications');
-    onValue(notificationsRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const arr = Object.keys(data).map(key => ({ id: key, ...data[key] }));
-        setNotifications(arr.sort((a, b) => b.timestamp - a.timestamp));
-      } else {
-        setNotifications([]);
-      }
-    });
-
-    const usersRef = ref(database, 'users');
-    onValue(usersRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        setAllUsers(data);
-      }
-    });
+  const loadAllData = () => {
+    setRequests(Object.values(DB.requests || {}).sort((a, b) => b.timestamp - a.timestamp));
+    setEvents(Object.values(DB.events || {}).sort((a, b) => new Date(a.date) - new Date(b.date)));
+    setNotifications(Object.values(DB.notifications || []).sort((a, b) => b.timestamp - a.timestamp));
+    setAllUsers(DB.users || {});
+    setMessages(DB.messages || {});
   };
 
-  const addNotification = async (message) => {
-    const notifRef = ref(database, 'notifications');
-    await push(notifRef, { message, time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), timestamp: Date.now() });
+  const saveDB = () => {
+    localStorage.setItem('appPotesDB', JSON.stringify(DB));
   };
 
-  const handleSignUp = async () => {
-    if (!email || !password || !username) return alert('⚠️ Remplis tous les champs');
-    try {
-      const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      await set(ref(database, `users/${userCredential.user.uid}`), { 
-        username, 
-        email, 
-        createdAt: Date.now(),
-        isAdmin: false,
-        isBanned: false
+  const sendNotification = (title, options = {}) => {
+    if (notificationsEnabled && 'Notification' in window) {
+      new Notification(title, {
+        icon: '🎉',
+        ...options
       });
-      await addNotification(`🎉 ${username} a rejoint l'app !`);
-    } catch (error) {
-      alert('❌ ' + error.message);
     }
   };
 
-  const handleSignIn = async () => {
+  const addNotification = (message) => {
+    const notif = { 
+      id: Date.now(), 
+      message, 
+      time: new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }), 
+      timestamp: Date.now() 
+    };
+    DB.notifications.push(notif);
+    setNotifications([notif, ...notifications]);
+    saveDB();
+    sendNotification(message);
+  };
+
+  const handleSignUp = () => {
+    if (!email || !password || !username) return alert('⚠️ Remplis tous les champs');
+    if (Object.values(DB.users).some(u => u.email === email)) {
+      return alert('❌ Email déjà utilisé');
+    }
+    const userId = 'user_' + Date.now();
+    DB.users[userId] = {
+      id: userId,
+      username,
+      email,
+      isAdmin: false,
+      isBanned: false,
+      createdAt: Date.now()
+    };
+    saveDB();
+    const userData = { id: userId, username, email, isAdmin: false };
+    setUser(userData);
+    setUsername(username);
+    localStorage.setItem('appPotesAuth', JSON.stringify(userData));
+    addNotification(`🎉 ${username} a rejoint l'app !`);
+    setEmail('');
+    setPassword('');
+    setUsername('');
+  };
+
+  const handleSignIn = () => {
     if (!email || !password) return alert('⚠️ Remplis tous les champs');
-    try {
-      const userCredential = await signInWithEmailAndPassword(auth, email, password);
-      const userRef = ref(database, `users/${userCredential.user.uid}`);
-      const snapshot = await get(userRef);
-      if (snapshot.exists() && snapshot.val().isBanned) {
-        await signOut(auth);
-        alert('❌ Ton compte a été banni');
-        return;
-      }
-    } catch (error) {
-      alert('❌ ' + error.message);
-    }
+    const userObj = Object.values(DB.users).find(u => u.email === email);
+    if (!userObj) return alert('❌ Email introuvable');
+    if (userObj.isBanned) return alert('❌ Ton compte a été banni');
+    const userData = { id: userObj.id, username: userObj.username, email: userObj.email, isAdmin: userObj.isAdmin };
+    setUser(userData);
+    setUsername(userObj.username);
+    setIsAdmin(userObj.isAdmin);
+    localStorage.setItem('appPotesAuth', JSON.stringify(userData));
+    loadAllData();
+    setEmail('');
+    setPassword('');
   };
 
-  const handleLogout = async () => {
-    try {
-      await signOut(auth);
-      setIsAdmin(false);
-    } catch (error) {
-      console.error(error);
-    }
+  const handleLogout = () => {
+    setUser(null);
+    setIsAdmin(false);
+    setUsername('');
+    localStorage.removeItem('appPotesAuth');
   };
 
-  const handleAdminLogin = async () => {
+  const handleAdminLogin = () => {
     if (adminPassword === 'admin123') {
-      await update(ref(database, `users/${user.uid}`), { isAdmin: true });
+      DB.users[user.id].isAdmin = true;
+      saveDB();
       setIsAdmin(true);
       setShowAdminPanel(false);
-      await addNotification('⚙️ Mode admin activé');
+      localStorage.setItem('appPotesAuth', JSON.stringify({ ...user, isAdmin: true }));
+      addNotification('⚙️ Mode admin activé');
     } else {
       alert('❌ Mot de passe incorrect');
     }
     setAdminPassword('');
   };
 
-  const promoteToAdmin = async (userId) => {
-    await update(ref(database, `users/${userId}`), { isAdmin: true });
-    await addNotification(`👑 ${allUsers[userId].username} est devenu admin`);
+  const promoteToAdmin = (userId) => {
+    DB.users[userId].isAdmin = true;
+    saveDB();
+    setAllUsers({ ...DB.users });
+    addNotification(`👑 ${DB.users[userId].username} est devenu admin`);
   };
 
-  const removeAdmin = async (userId) => {
-    await update(ref(database, `users/${userId}`), { isAdmin: false });
-    await addNotification(`👤 ${allUsers[userId].username} n'est plus admin`);
+  const removeAdmin = (userId) => {
+    DB.users[userId].isAdmin = false;
+    saveDB();
+    setAllUsers({ ...DB.users });
+    addNotification(`👤 ${DB.users[userId].username} n'est plus admin`);
   };
 
-  const banUser = async (userId) => {
-    await update(ref(database, `users/${userId}`), { isBanned: true });
-    await addNotification(`🚫 ${allUsers[userId].username} a été banni`);
+  const banUser = (userId) => {
+    DB.users[userId].isBanned = true;
+    saveDB();
+    setAllUsers({ ...DB.users });
+    addNotification(`🚫 ${DB.users[userId].username} a été banni`);
   };
 
-  const unbanUser = async (userId) => {
-    await update(ref(database, `users/${userId}`), { isBanned: false });
-    await addNotification(`✅ ${allUsers[userId].username} a été débanni`);
+  const unbanUser = (userId) => {
+    DB.users[userId].isBanned = false;
+    saveDB();
+    setAllUsers({ ...DB.users });
+    addNotification(`✅ ${DB.users[userId].username} a été débanni`);
   };
 
-  const kickUser = async (userId) => {
-    await addNotification(`👢 ${allUsers[userId].username} a été expulsé`);
+  const kickUser = (userId) => {
+    addNotification(`👢 ${DB.users[userId].username} a été expulsé`);
   };
 
-  const addRequest = async () => {
+  const addRequest = () => {
     if (!newRequestType || !newRequestMessage) return alert('⚠️ Remplis tous les champs');
-    await push(ref(database, 'requests'), {
-      user: username || email.split('@')[0],
-      userId: user.uid,
+    const id = 'req_' + Date.now();
+    DB.requests[id] = {
+      id,
+      user: username,
+      userId: user.id,
       type: newRequestType,
       message: newRequestMessage,
-      status: 'pending',
       responses: {},
       timestamp: Date.now()
-    });
+    };
+    saveDB();
+    setRequests(Object.values(DB.requests).sort((a, b) => b.timestamp - a.timestamp));
     setNewRequestType('');
     setNewRequestMessage('');
-    await addNotification(`✨ ${username || email.split('@')[0]} : ${newRequestType}`);
+    addNotification(`✨ ${username} : ${newRequestType}`);
   };
 
-  const respondToRequest = async (requestId, response, customText = null) => {
-    await set(ref(database, `requests/${requestId}/responses/${user.uid}`), {
-      user: username || email.split('@')[0],
+  const respondToRequest = (requestId, response, customText = null) => {
+    DB.requests[requestId].responses[user.id] = {
+      user: username,
       response,
       customText: customText || null,
       timestamp: Date.now()
-    });
-    await addNotification(`👍 Réponse à une demande`);
+    };
+    saveDB();
+    setRequests(Object.values(DB.requests).sort((a, b) => b.timestamp - a.timestamp));
+    addNotification(`👍 ${username} a répondu à une demande`);
     setShowCustomResponseModal(null);
     setCustomResponseText('');
   };
 
-  const deleteRequest = async (id) => {
-    await remove(ref(database, `requests/${id}`));
-    await addNotification('🗑️ Demande supprimée');
+  const deleteRequest = (id) => {
+    delete DB.requests[id];
+    saveDB();
+    setRequests(Object.values(DB.requests).sort((a, b) => b.timestamp - a.timestamp));
+    addNotification('🗑️ Demande supprimée');
   };
 
-  const addEvent = async () => {
+  const addEvent = () => {
     if (!newEvent.title || !newEvent.date || !newEvent.time) return alert('⚠️ Remplis tous les champs');
-    await push(ref(database, 'events'), {
+    const id = 'evt_' + Date.now();
+    DB.events[id] = {
+      id,
       ...newEvent,
       attendees: {},
-      createdBy: user.uid,
+      createdBy: user.id,
       timestamp: Date.now()
-    });
+    };
+    saveDB();
+    setEvents(Object.values(DB.events).sort((a, b) => new Date(a.date) - new Date(b.date)));
     setNewEvent({ title: '', date: '', time: '' });
-    await addNotification(`📅 Nouvel événement : ${newEvent.title}`);
+    addNotification(`📅 Nouvel événement : ${newEvent.title}`);
   };
 
-  const joinEvent = async (eventId) => {
-    await set(ref(database, `events/${eventId}/attendees/${user.uid}`), {
-      username: username || email.split('@')[0],
+  const joinEvent = (eventId) => {
+    DB.events[eventId].attendees[user.id] = {
+      username,
+      timestamp: Date.now()
+    };
+    saveDB();
+    setEvents(Object.values(DB.events).sort((a, b) => new Date(a.date) - new Date(b.date)));
+    addNotification(`🎉 ${username} participe !`);
+  };
+
+  const deleteEvent = (id) => {
+    delete DB.events[id];
+    saveDB();
+    setEvents(Object.values(DB.events).sort((a, b) => new Date(a.date) - new Date(b.date)));
+    addNotification('🗑️ Événement supprimé');
+  };
+
+  const getMessages = (otherId) => {
+    const key = [user.id, otherId].sort().join('_');
+    return DB.messages[key] || [];
+  };
+
+  const sendMessage = (recipientId) => {
+    if (!newMessage.trim()) return;
+    const key = [user.id, recipientId].sort().join('_');
+    if (!DB.messages[key]) DB.messages[key] = [];
+    DB.messages[key].push({
+      from: user.id,
+      fromName: username,
+      text: newMessage,
       timestamp: Date.now()
     });
-    await addNotification(`🎉 Participation confirmée`);
-  };
-
-  const deleteEvent = async (id) => {
-    await remove(ref(database, `events/${id}`));
-    await addNotification('🗑️ Événement supprimé');
+    saveDB();
+    setMessages({ ...DB.messages });
+    setNewMessage('');
+    addNotification(`💬 Message de ${username}`);
+    sendNotification(`Nouveau message de ${username}`, { tag: 'message' });
   };
 
   const startCall = async () => {
@@ -245,20 +301,20 @@ export default function App() {
       localStreamRef.current = stream;
       setIsInCall(true);
       setShowCallModal(true);
-      await addNotification('📞 Appel vocal démarré');
+      addNotification('📞 Appel vocal démarré');
+      sendNotification('Appel vocal actif', { tag: 'call' });
     } catch (error) {
       alert('❌ Micro inaccessible');
     }
   };
 
-  const endCall = async () => {
+  const endCall = () => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
     }
     setIsInCall(false);
     setShowCallModal(false);
-    setIsMuted(false);
-    await addNotification('📞 Appel terminé');
+    addNotification('📞 Appel terminé');
   };
 
   const toggleMute = () => {
@@ -266,47 +322,6 @@ export default function App() {
       const audioTrack = localStreamRef.current.getAudioTracks()[0];
       audioTrack.enabled = !audioTrack.enabled;
       setIsMuted(!audioTrack.enabled);
-    }
-  };
-
-  const startRecording = async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      
-      const audioChunks = [];
-      mediaRecorder.ondataavailable = (event) => audioChunks.push(event.data);
-      mediaRecorder.onstop = async () => {
-        const audioBlob = new Blob(audioChunks, { type: 'audio/webm' });
-        const reader = new FileReader();
-        reader.readAsDataURL(audioBlob);
-        reader.onloadend = async () => {
-          await push(ref(database, 'requests'), {
-            user: username || email.split('@')[0],
-            userId: user.uid,
-            type: '🎤 Vocal',
-            message: 'Message vocal',
-            audioUrl: reader.result,
-            status: 'pending',
-            responses: {},
-            timestamp: Date.now()
-          });
-          await addNotification('🎤 Message vocal envoyé');
-        };
-        stream.getTracks().forEach(track => track.stop());
-      };
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch (error) {
-      alert('❌ Micro inaccessible');
-    }
-  };
-
-  const stopRecording = () => {
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
     }
   };
 
@@ -328,7 +343,6 @@ export default function App() {
         <div className="absolute inset-0 overflow-hidden pointer-events-none">
           <div className="absolute w-96 h-96 bg-white/10 rounded-full -top-48 -left-48 animate-pulse"></div>
           <div className="absolute w-96 h-96 bg-white/10 rounded-full -bottom-48 -right-48 animate-pulse" style={{ animationDelay: '1s' }}></div>
-          <div className="absolute w-64 h-64 bg-white/5 rounded-full top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 animate-pulse" style={{ animationDelay: '2s' }}></div>
         </div>
 
         <div className="bg-white/95 backdrop-blur-2xl rounded-3xl shadow-2xl p-8 w-full max-w-md relative z-10 border border-white/20">
@@ -396,12 +410,6 @@ export default function App() {
               {authMode === 'signup' ? '✨ Créer mon compte' : '🚀 Se connecter'}
             </button>
           </div>
-
-          <div className="mt-6 p-4 bg-gradient-to-r from-blue-50 to-purple-50 rounded-xl border-2 border-purple-200">
-            <p className="text-sm text-purple-800 text-center font-bold">
-              💡 Crée ton compte pour rejoindre tes potes !
-            </p>
-          </div>
         </div>
       </div>
     );
@@ -413,10 +421,9 @@ export default function App() {
         <div className="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="relative">
-              <div className="w-14 h-14 bg-gradient-to-br from-purple-600 via-pink-500 to-orange-500 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-xl animate-pulse">
-                {(username || email)?.[0]?.toUpperCase()}
+              <div className="w-14 h-14 bg-gradient-to-br from-purple-600 via-pink-500 to-orange-500 rounded-2xl flex items-center justify-center text-white font-black text-xl shadow-xl">
+                {username?.[0]?.toUpperCase()}
               </div>
-              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white"></div>
               {isAdmin && (
                 <div className="absolute -top-1 -right-1 w-6 h-6 bg-yellow-400 rounded-full border-2 border-white flex items-center justify-center">
                   <Crown className="w-3 h-3 text-white" />
@@ -424,7 +431,7 @@ export default function App() {
               )}
             </div>
             <div>
-              <h2 className="font-black text-gray-800 text-lg">{username || email.split('@')[0]}</h2>
+              <h2 className="font-black text-gray-800 text-lg">{username}</h2>
               <p className="text-xs text-gray-500 font-medium">{email}</p>
             </div>
           </div>
@@ -438,6 +445,12 @@ export default function App() {
                 <Phone className="w-6 h-6 text-green-600" />
               </button>
             )}
+            <button
+              onClick={() => setShowMessages(!showMessages)}
+              className="p-3 hover:bg-blue-100 rounded-xl transition-all transform hover:scale-110 active:scale-95 relative"
+            >
+              <MessageCircle className="w-6 h-6 text-blue-600" />
+            </button>
             <button
               onClick={() => setShowAdminPanel(!showAdminPanel)}
               className="p-3 hover:bg-purple-100 rounded-xl transition-all transform hover:scale-110 active:scale-95"
@@ -455,8 +468,8 @@ export default function App() {
       </header>
 
       {showCallModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
-          <div className="bg-gradient-to-br from-purple-600 to-pink-500 rounded-3xl p-8 w-full max-w-md text-center shadow-2xl">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-gradient-to-br from-purple-600 to-pink-500 rounded-3xl p-8 w-full max-w-md text-center shadow-2xl animate-bounce">
             <div className="w-24 h-24 bg-white/20 rounded-full flex items-center justify-center mx-auto mb-6 animate-pulse">
               <Phone className="w-12 h-12 text-white" />
             </div>
@@ -482,24 +495,111 @@ export default function App() {
         </div>
       )}
 
+      {showMessages && (
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-3xl w-full max-w-2xl h-[80vh] flex flex-col shadow-2xl">
+            <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-6 rounded-t-3xl flex items-center justify-between">
+              <h3 className="text-2xl font-black flex items-center gap-2">
+                <MessageCircle className="w-6 h-6" />
+                Messagerie
+              </h3>
+              <button onClick={() => setShowMessages(false)} className="p-2 hover:bg-white/20 rounded-lg">
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+
+            <div className="flex flex-1 overflow-hidden">
+              <div className="w-1/3 border-r bg-gray-50 overflow-y-auto">
+                {Object.entries(DB.users).filter(([id]) => id !== user.id).map(([userId, userData]) => (
+                  <button
+                    key={userId}
+                    onClick={() => setSelectedUser(userId)}
+                    className={`w-full p-4 text-left border-b transition-all ${
+                      selectedUser === userId ? 'bg-blue-100 border-blue-300' : 'hover:bg-gray-100'
+                    }`}
+                  >
+                    <p className="font-bold text-gray-800">{userData.username}</p>
+                    <p className="text-sm text-gray-500">{userData.email}</p>
+                  </button>
+                ))}
+              </div>
+
+              <div className="w-2/3 flex flex-col">
+                {selectedUser ? (
+                  <>
+                    <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-gray-50">
+                      {getMessages(selectedUser).map((msg, idx) => (
+                        <div key={idx} className={`flex ${msg.from === user.id ? 'justify-end' : 'justify-start'}`}>
+                          <div
+                            className={`max-w-xs p-4 rounded-2xl ${
+                              msg.from === user.id
+                                ? 'bg-gradient-to-r from-blue-500 to-purple-500 text-white rounded-br-none'
+                                : 'bg-white text-gray-800 rounded-bl-none border-2 border-gray-200'
+                            }`}
+                          >
+                            <p className="font-bold text-sm mb-1">{msg.fromName}</p>
+                            <p className="break-words">{msg.text}</p>
+                            <p className="text-xs opacity-70 mt-1">
+                              {new Date(msg.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="border-t p-4 flex gap-2 bg-white rounded-b-3xl">
+                      <input
+                        type="text"
+                        placeholder="Écris ton message..."
+                        value={newMessage}
+                        onChange={(e) => setNewMessage(e.target.value)}
+                        onKeyPress={(e) => e.key === 'Enter' && sendMessage(selectedUser)}
+                        className="flex-1 px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-blue-200 outline-none text-gray-800"
+                      />
+                      <button
+                        onClick={() => sendMessage(selectedUser)}
+                        className="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-3 rounded-xl hover:shadow-lg transition-all transform hover:scale-110 active:scale-95"
+                      >
+                        <Send className="w-5 h-5" />
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <div className="flex-1 flex items-center justify-center text-gray-500">
+                    <p className="font-bold text-lg">Sélectionne un utilisateur</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showAdminPanel && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-3xl font-black mb-6 bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
               ⚙️ Admin Panel
             </h3>
             {!isAdmin ? (
               <div className="space-y-4">
-                <input
-                  type="password"
-                  placeholder="🔑 Mot de passe admin"
-                  value={adminPassword}
-                  onChange={(e) => setAdminPassword(e.target.value)}
-                  className="w-full px-4 py-4 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none text-lg"
-                />
+                <div className="relative">
+                  <input
+                    type={showAdminPassword ? "text" : "password"}
+                    placeholder="🔑 Mot de passe admin"
+                    value={adminPassword}
+                    onChange={(e) => setAdminPassword(e.target.value)}
+                    className="w-full px-4 py-4 pr-12 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-purple-200 outline-none text-lg"
+                  />
+                  <button
+                    onClick={() => setShowAdminPassword(!showAdminPassword)}
+                    className="absolute right-4 top-1/2 -translate-y-1/2 p-2 hover:bg-gray-100 rounded-lg transition-all"
+                  >
+                    {showAdminPassword ? <EyeOff className="w-5 h-5 text-gray-600" /> : <Eye className="w-5 h-5 text-gray-600" />}
+                  </button>
+                </div>
                 <button
                   onClick={handleAdminLogin}
-                  className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-4 rounded-xl font-black hover:shadow-xl transition-all transform hover:scale-105"
+                  className="w-full bg-gradient-to-r from-purple-600 to-pink-500 text-white py-4 rounded-xl font-black hover:shadow-xl transition-all transform hover:scale-105 active:scale-95"
                 >
                   Se connecter
                 </button>
@@ -548,7 +648,7 @@ export default function App() {
                             )}
                           </div>
                         </div>
-                        {userId !== user.uid && (
+                        {userId !== user.id && (
                           <div className="flex gap-2 flex-wrap">
                             {!userData.isAdmin ? (
                               <button
@@ -600,7 +700,7 @@ export default function App() {
             )}
             <button
               onClick={() => setShowAdminPanel(false)}
-              className="w-full bg-gray-100 text-gray-700 py-4 rounded-xl font-bold hover:bg-gray-200 transition-all"
+              className="w-full bg-gray-100 text-gray-700 py-4 rounded-xl font-bold hover:bg-gray-200 transition-all mt-6"
             >
               Fermer
             </button>
@@ -609,7 +709,7 @@ export default function App() {
       )}
 
       {showCustomResponseModal && (
-        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
+        <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
             <h3 className="text-2xl font-black mb-4 bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
               💬 Réponse personnalisée
@@ -704,24 +804,13 @@ export default function App() {
                   className="w-full px-4 py-4 rounded-2xl border-2 border-white/20 focus:border-white focus:ring-4 focus:ring-white/20 outline-none bg-white/10 text-white placeholder-white/60 font-medium resize-none"
                   rows="3"
                 />
-                <div className="flex gap-3">
-                  <button
-                    onClick={isRecording ? stopRecording : startRecording}
-                    className={`flex-1 py-4 rounded-2xl font-black transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2 ${
-                      isRecording ? 'bg-red-500 animate-pulse' : 'bg-white/20 hover:bg-white/30'
-                    }`}
-                  >
-                    <Mic className="w-5 h-5" />
-                    {isRecording ? 'Arrêter' : 'Vocal'}
-                  </button>
-                  <button
-                    onClick={addRequest}
-                    className="flex-1 bg-white text-purple-600 py-4 rounded-2xl font-black hover:shadow-2xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
-                  >
-                    <Send className="w-5 h-5" />
-                    Envoyer
-                  </button>
-                </div>
+                <button
+                  onClick={addRequest}
+                  className="w-full bg-white text-purple-600 py-4 rounded-2xl font-black hover:shadow-2xl transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2"
+                >
+                  <Send className="w-5 h-5" />
+                  Envoyer
+                </button>
               </div>
             </div>
 
@@ -755,11 +844,6 @@ export default function App() {
                       )}
                     </div>
                     <p className="text-gray-700 font-medium mb-4 text-lg bg-gray-50 p-4 rounded-2xl">{req.message}</p>
-                    {req.audioUrl && (
-                      <audio controls className="w-full mb-4 rounded-xl">
-                        <source src={req.audioUrl} type="audio/webm" />
-                      </audio>
-                    )}
                     <div className="flex gap-3">
                       <button
                         onClick={() => respondToRequest(req.id, 'yes')}
@@ -893,14 +977,14 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => joinEvent(evt.id)}
-                      disabled={evt.attendees && evt.attendees[user.uid]}
+                      disabled={evt.attendees && evt.attendees[user.id]}
                       className={`w-full py-4 rounded-2xl font-black transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2 ${
-                        evt.attendees && evt.attendees[user.uid]
+                        evt.attendees && evt.attendees[user.id]
                           ? 'bg-green-100 text-green-700 cursor-not-allowed'
                           : 'bg-gradient-to-r from-pink-500 to-orange-500 text-white hover:shadow-xl'
                       }`}
                     >
-                      {evt.attendees && evt.attendees[user.uid] ? (
+                      {evt.attendees && evt.attendees[user.id] ? (
                         <>
                           <Check className="w-5 h-5" />
                           Tu participes déjà ! 🎉

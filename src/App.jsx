@@ -1,43 +1,8 @@
-<button
-                      onClick={() => joinEvent(evt.id)}
-                      disabled={evt.attendees && evt.attendees[user.uid]}
-                      className={`w-full py-4 rounded-2xl font-black transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2 ${
-                        evt.attendees && evt.attendees[user.uid]
-                          ? 'bg-green-100 text-green-700 cursor-not-allowed'
-                          : 'bg-gradient-to-r from-pink-500 to-orange-500 text-white hover:shadow-xl'
-                      }`}
-                    >
-                      {evt.attendees && evt.attendees[user.uid] ? (
-                        <>
-                          <Check className="w-5 h-5" />
-                          Tu participes déjà ! 🎉
-                        </>
-                      ) : (
-                        <>
-                          <Plus className="w-5 h-5" />
-                          Je participe !
-                        </>
-                      )}
-                    </button>
-                    {evt.attendees && Object.keys(evt.attendees).length > 0 && (
-                      <div className="mt-4 pt-4 border-t-2 border-gray-100">
-                        <p className="text-sm font-black text-gray-500 mb-3 flex items-center gap-2">
-                          <Users className="w-4 h-4" />
-                          Participants ({Object.keys(evt.attendees).length})
-                        </p>
-                        <div className="flex flex-wrap gap-2">
-                          {Object.values(evt.attendees).map((attendee, idx) => (
-                            <span key={idx} className="bg-gradient-to-r from-pink-100 to-orange-100 text-pink-700 px-4 py-2 rounded-full font-bold text-sm">
-                              {attendee.username}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}import React, { useState, useEffect, useRef } from 'react';
-import { User, Calendar, Bell, Settings, LogOut, Plus, Trash2, Check, X, Sparkles, Users, Clock, Phone, Mic, MicOff, PhoneOff, Send, MessageCircle, Zap, Edit3 } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { User, Calendar, Bell, Settings, LogOut, Plus, Trash2, Check, X, Sparkles, Users, Clock, Phone, Mic, MicOff, PhoneOff, Send, MessageCircle, Zap, Edit3, UserX, Shield, Crown } from 'lucide-react';
 import { auth, database } from './firebase';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth';
-import { ref, push, set, onValue, remove, get } from 'firebase/database';
+import { ref, push, set, onValue, remove, get, update } from 'firebase/database';
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -60,9 +25,10 @@ export default function App() {
   const [isMuted, setIsMuted] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [showCallModal, setShowCallModal] = useState(false);
-  const [customResponses, setCustomResponses] = useState({});
   const [showCustomResponseModal, setShowCustomResponseModal] = useState(null);
   const [customResponseText, setCustomResponseText] = useState('');
+  const [allUsers, setAllUsers] = useState({});
+  const [showUserManagement, setShowUserManagement] = useState(false);
   const localStreamRef = useRef(null);
   const mediaRecorderRef = useRef(null);
 
@@ -76,11 +42,13 @@ export default function App() {
         if (snapshot.exists()) {
           const userData = snapshot.val();
           setUsername(userData.username);
+          setIsAdmin(userData.isAdmin || false);
         }
         setUser(currentUser);
         loadFirebaseData();
       } else {
         setUser(null);
+        setIsAdmin(false);
       }
       setLoading(false);
     });
@@ -120,6 +88,14 @@ export default function App() {
         setNotifications([]);
       }
     });
+
+    const usersRef = ref(database, 'users');
+    onValue(usersRef, (snapshot) => {
+      const data = snapshot.val();
+      if (data) {
+        setAllUsers(data);
+      }
+    });
   };
 
   const addNotification = async (message) => {
@@ -131,8 +107,14 @@ export default function App() {
     if (!email || !password || !username) return alert('⚠️ Remplis tous les champs');
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-      await set(ref(database, `users/${userCredential.user.uid}`), { username, email, createdAt: Date.now() });
-      addNotification(`🎉 ${username} a rejoint l'app !`);
+      await set(ref(database, `users/${userCredential.user.uid}`), { 
+        username, 
+        email, 
+        createdAt: Date.now(),
+        isAdmin: false,
+        isBanned: false
+      });
+      await addNotification(`🎉 ${username} a rejoint l'app !`);
     } catch (error) {
       alert('❌ ' + error.message);
     }
@@ -141,7 +123,14 @@ export default function App() {
   const handleSignIn = async () => {
     if (!email || !password) return alert('⚠️ Remplis tous les champs');
     try {
-      await signInWithEmailAndPassword(auth, email, password);
+      const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      const userRef = ref(database, `users/${userCredential.user.uid}`);
+      const snapshot = await get(userRef);
+      if (snapshot.exists() && snapshot.val().isBanned) {
+        await signOut(auth);
+        alert('❌ Ton compte a été banni');
+        return;
+      }
     } catch (error) {
       alert('❌ ' + error.message);
     }
@@ -156,15 +145,40 @@ export default function App() {
     }
   };
 
-  const handleAdminLogin = () => {
+  const handleAdminLogin = async () => {
     if (adminPassword === 'admin123') {
+      await update(ref(database, `users/${user.uid}`), { isAdmin: true });
       setIsAdmin(true);
-      addNotification('⚙️ Mode admin activé');
       setShowAdminPanel(false);
+      await addNotification('⚙️ Mode admin activé');
     } else {
       alert('❌ Mot de passe incorrect');
     }
     setAdminPassword('');
+  };
+
+  const promoteToAdmin = async (userId) => {
+    await update(ref(database, `users/${userId}`), { isAdmin: true });
+    await addNotification(`👑 ${allUsers[userId].username} est devenu admin`);
+  };
+
+  const removeAdmin = async (userId) => {
+    await update(ref(database, `users/${userId}`), { isAdmin: false });
+    await addNotification(`👤 ${allUsers[userId].username} n'est plus admin`);
+  };
+
+  const banUser = async (userId) => {
+    await update(ref(database, `users/${userId}`), { isBanned: true });
+    await addNotification(`🚫 ${allUsers[userId].username} a été banni`);
+  };
+
+  const unbanUser = async (userId) => {
+    await update(ref(database, `users/${userId}`), { isBanned: false });
+    await addNotification(`✅ ${allUsers[userId].username} a été débanni`);
+  };
+
+  const kickUser = async (userId) => {
+    await addNotification(`👢 ${allUsers[userId].username} a été expulsé`);
   };
 
   const addRequest = async () => {
@@ -180,7 +194,7 @@ export default function App() {
     });
     setNewRequestType('');
     setNewRequestMessage('');
-    addNotification(`✨ ${username || email.split('@')[0]} : ${newRequestType}`);
+    await addNotification(`✨ ${username || email.split('@')[0]} : ${newRequestType}`);
   };
 
   const respondToRequest = async (requestId, response, customText = null) => {
@@ -190,14 +204,14 @@ export default function App() {
       customText: customText || null,
       timestamp: Date.now()
     });
-    addNotification(`👍 Réponse à une demande`);
+    await addNotification(`👍 Réponse à une demande`);
     setShowCustomResponseModal(null);
     setCustomResponseText('');
   };
 
   const deleteRequest = async (id) => {
     await remove(ref(database, `requests/${id}`));
-    addNotification('🗑️ Demande supprimée');
+    await addNotification('🗑️ Demande supprimée');
   };
 
   const addEvent = async () => {
@@ -209,7 +223,7 @@ export default function App() {
       timestamp: Date.now()
     });
     setNewEvent({ title: '', date: '', time: '' });
-    addNotification(`📅 Nouvel événement : ${newEvent.title}`);
+    await addNotification(`📅 Nouvel événement : ${newEvent.title}`);
   };
 
   const joinEvent = async (eventId) => {
@@ -217,12 +231,12 @@ export default function App() {
       username: username || email.split('@')[0],
       timestamp: Date.now()
     });
-    addNotification(`🎉 Participation confirmée`);
+    await addNotification(`🎉 Participation confirmée`);
   };
 
   const deleteEvent = async (id) => {
     await remove(ref(database, `events/${id}`));
-    addNotification('🗑️ Événement supprimé');
+    await addNotification('🗑️ Événement supprimé');
   };
 
   const startCall = async () => {
@@ -231,20 +245,20 @@ export default function App() {
       localStreamRef.current = stream;
       setIsInCall(true);
       setShowCallModal(true);
-      addNotification('📞 Appel vocal démarré');
+      await addNotification('📞 Appel vocal démarré');
     } catch (error) {
       alert('❌ Micro inaccessible');
     }
   };
 
-  const endCall = () => {
+  const endCall = async () => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(track => track.stop());
     }
     setIsInCall(false);
     setShowCallModal(false);
     setIsMuted(false);
-    addNotification('📞 Appel terminé');
+    await addNotification('📞 Appel terminé');
   };
 
   const toggleMute = () => {
@@ -278,7 +292,7 @@ export default function App() {
             responses: {},
             timestamp: Date.now()
           });
-          addNotification('🎤 Message vocal envoyé');
+          await addNotification('🎤 Message vocal envoyé');
         };
         stream.getTracks().forEach(track => track.stop());
       };
@@ -403,6 +417,11 @@ export default function App() {
                 {(username || email)?.[0]?.toUpperCase()}
               </div>
               <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white"></div>
+              {isAdmin && (
+                <div className="absolute -top-1 -right-1 w-6 h-6 bg-yellow-400 rounded-full border-2 border-white flex items-center justify-center">
+                  <Crown className="w-3 h-3 text-white" />
+                </div>
+              )}
             </div>
             <div>
               <h2 className="font-black text-gray-800 text-lg">{username || email.split('@')[0]}</h2>
@@ -465,7 +484,7 @@ export default function App() {
 
       {showAdminPanel && (
         <div className="fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-fadeIn">
-          <div className="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl">
+          <div className="bg-white rounded-3xl p-8 w-full max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
             <h3 className="text-3xl font-black mb-6 bg-gradient-to-r from-purple-600 to-pink-500 bg-clip-text text-transparent">
               ⚙️ Admin Panel
             </h3>
@@ -486,13 +505,102 @@ export default function App() {
                 </button>
               </div>
             ) : (
-              <div className="p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border-2 border-green-300">
-                <p className="text-green-700 font-black text-center text-lg">✅ Mode admin activé</p>
-              </div>
+              <>
+                <div className="p-6 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border-2 border-green-300 mb-6">
+                  <p className="text-green-700 font-black text-center text-lg">✅ Mode admin activé</p>
+                </div>
+                
+                <div className="mb-6">
+                  <button
+                    onClick={() => setShowUserManagement(!showUserManagement)}
+                    className="w-full bg-gradient-to-r from-blue-500 to-purple-500 text-white py-4 rounded-xl font-black hover:shadow-xl transition-all flex items-center justify-center gap-2"
+                  >
+                    <Users className="w-5 h-5" />
+                    Gestion des utilisateurs ({Object.keys(allUsers).length})
+                  </button>
+                </div>
+
+                {showUserManagement && (
+                  <div className="space-y-3 mb-6">
+                    {Object.entries(allUsers).map(([userId, userData]) => (
+                      <div key={userId} className="bg-gray-50 p-4 rounded-2xl border-2 border-gray-200">
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-pink-500 rounded-xl flex items-center justify-center text-white font-black">
+                              {userData.username?.[0]?.toUpperCase()}
+                            </div>
+                            <div>
+                              <p className="font-black text-gray-800">{userData.username}</p>
+                              <p className="text-xs text-gray-500">{userData.email}</p>
+                            </div>
+                          </div>
+                          <div className="flex gap-1">
+                            {userData.isAdmin && (
+                              <span className="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-xs font-black flex items-center gap-1">
+                                <Crown className="w-3 h-3" />
+                                Admin
+                              </span>
+                            )}
+                            {userData.isBanned && (
+                              <span className="px-3 py-1 bg-red-100 text-red-700 rounded-full text-xs font-black">
+                                Banni
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        {userId !== user.uid && (
+                          <div className="flex gap-2 flex-wrap">
+                            {!userData.isAdmin ? (
+                              <button
+                                onClick={() => promoteToAdmin(userId)}
+                                className="flex-1 bg-yellow-500 text-white py-2 px-3 rounded-xl text-sm font-bold hover:bg-yellow-600 transition-all flex items-center justify-center gap-1"
+                              >
+                                <Crown className="w-4 h-4" />
+                                Admin
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => removeAdmin(userId)}
+                                className="flex-1 bg-gray-400 text-white py-2 px-3 rounded-xl text-sm font-bold hover:bg-gray-500 transition-all flex items-center justify-center gap-1"
+                              >
+                                <Shield className="w-4 h-4" />
+                                Retirer
+                              </button>
+                            )}
+                            {!userData.isBanned ? (
+                              <button
+                                onClick={() => banUser(userId)}
+                                className="flex-1 bg-red-500 text-white py-2 px-3 rounded-xl text-sm font-bold hover:bg-red-600 transition-all flex items-center justify-center gap-1"
+                              >
+                                <UserX className="w-4 h-4" />
+                                Bannir
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => unbanUser(userId)}
+                                className="flex-1 bg-green-500 text-white py-2 px-3 rounded-xl text-sm font-bold hover:bg-green-600 transition-all flex items-center justify-center gap-1"
+                              >
+                                <Check className="w-4 h-4" />
+                                Débannir
+                              </button>
+                            )}
+                            <button
+                              onClick={() => kickUser(userId)}
+                              className="flex-1 bg-orange-500 text-white py-2 px-3 rounded-xl text-sm font-bold hover:bg-orange-600 transition-all"
+                            >
+                              👢 Expulser
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
             )}
             <button
               onClick={() => setShowAdminPanel(false)}
-              className="mt-6 w-full bg-gray-100 text-gray-700 py-4 rounded-xl font-bold hover:bg-gray-200 transition-all"
+              className="w-full bg-gray-100 text-gray-700 py-4 rounded-xl font-bold hover:bg-gray-200 transition-all"
             >
               Fermer
             </button>
@@ -785,14 +893,14 @@ export default function App() {
                     </div>
                     <button
                       onClick={() => joinEvent(evt.id)}
-                      disabled={evt.attendees.includes(username || email.split('@')[0])}
+                      disabled={evt.attendees && evt.attendees[user.uid]}
                       className={`w-full py-4 rounded-2xl font-black transition-all transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2 ${
-                        evt.attendees.includes(username || email.split('@')[0])
+                        evt.attendees && evt.attendees[user.uid]
                           ? 'bg-green-100 text-green-700 cursor-not-allowed'
                           : 'bg-gradient-to-r from-pink-500 to-orange-500 text-white hover:shadow-xl'
                       }`}
                     >
-                      {evt.attendees.includes(username || email.split('@')[0]) ? (
+                      {evt.attendees && evt.attendees[user.uid] ? (
                         <>
                           <Check className="w-5 h-5" />
                           Tu participes déjà ! 🎉
@@ -804,16 +912,16 @@ export default function App() {
                         </>
                       )}
                     </button>
-                    {evt.attendees.length > 0 && (
+                    {evt.attendees && Object.keys(evt.attendees).length > 0 && (
                       <div className="mt-4 pt-4 border-t-2 border-gray-100">
                         <p className="text-sm font-black text-gray-500 mb-3 flex items-center gap-2">
                           <Users className="w-4 h-4" />
-                          Participants ({evt.attendees.length})
+                          Participants ({Object.keys(evt.attendees).length})
                         </p>
                         <div className="flex flex-wrap gap-2">
-                          {evt.attendees.map((attendee, idx) => (
+                          {Object.values(evt.attendees).map((attendee, idx) => (
                             <span key={idx} className="bg-gradient-to-r from-pink-100 to-orange-100 text-pink-700 px-4 py-2 rounded-full font-bold text-sm">
-                              {attendee}
+                              {attendee.username}
                             </span>
                           ))}
                         </div>

@@ -192,14 +192,12 @@ function attachMessagesListener(){
     const rendered = arr.filter(m => !m.groupId || m.groupId === activeGroupId).map(m => renderMessage(m)).join('');
     ui.messagesList.innerHTML = rendered;
     ui.messagesList.scrollTop = ui.messagesList.scrollHeight;
-    // local notifs for new messages not from me
     snapshot.forEach(ch=>{
       const m = ch.val();
       if (m && currentUser && m.userId !== currentUser.uid && m.room===activeRoom && (!m.groupId || m.groupId===activeGroupId)) {
         showLocalNotification(m.username, m.text || (m.type==='audio' ? 'Message vocal' : 'Nouveau message'));
       }
     });
-    // admin panel messages
     renderAdminMessagesList(arr);
   });
 }
@@ -331,6 +329,17 @@ async function inviteToGroup(){
 // RECORD AUDIO -> Base64
 let mediaRecorder = null, audioChunks = [];
 const MAX_AUDIO_BYTES = 2_500_000;
+
+// Utility function for blob to dataURL (declared once here)
+function blobToDataURL(blob){ 
+  return new Promise((res,rej)=>{ 
+    const r=new FileReader(); 
+    r.onload=()=>res(r.result); 
+    r.onerror=rej; 
+    r.readAsDataURL(blob); 
+  }); 
+}
+
 async function startRecording(){
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
@@ -351,7 +360,6 @@ async function startRecording(){
   } catch(e){ console.error(e); showError('Micro inaccessible'); }
 }
 function stopRecording(){ if (mediaRecorder && mediaRecorder.state !== 'inactive') mediaRecorder.stop(); ui.recStatus.textContent='Traitement...'; ui.startRecBtn.disabled=false; ui.stopRecBtn.disabled=true; }
-function blobToDataURL(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); }); }
 
 // speech recognition
 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -378,165 +386,3 @@ window.adminInitChangePassword = adminInitChangePassword;
 async function loadAdminUsers(){ const snap = await get(ref(db,'users')); ui.adminUsersList.innerHTML=''; if (!snap.exists()) return; snap.forEach(ch=>{ const u=ch.val(); const uid=ch.key; ui.adminUsersList.innerHTML += `<div style="display:flex;justify-content:space-between;padding:6px;border-bottom:1px solid rgba(255,255,255,0.03)"><div><strong>${escapeHtml(u.username)}</strong><div style="font-size:12px;color:rgba(255,255,255,0.6)">${escapeHtml(u.email||'')}</div></div><div style="display:flex;gap:6px;"><button class="btn btn-secondary" onclick="toggleAdmin('${uid}', ${u.isAdmin? 'true':'false'})">${u.isAdmin? 'Retirer':'Promouvoir'}</button><button class="delete-btn" onclick="removeUser('${uid}')">Suppr</button></div></div>`; }); }
 window.toggleAdmin = async (uid, cur) => { if (!adminUnlocked) return showError('Admin req'); await update(ref(db,'users/'+uid), { isAdmin: !cur }); loadAdminUsers(); showSuccess('Rôle modifié'); };
 window.removeUser = async (uid) => { if (!adminUnlocked) return showError('Admin req'); if (!confirm('Supprimer ?')) return; await remove(ref(db,'users/'+uid)); loadAdminUsers(); };
-
-// admin messages
-async function loadAdminMessages(){ const snap = await get(ref(db,'messages')); ui.adminMessagesList.innerHTML=''; if (!snap.exists()) return; snap.forEach(ch=>{ const m=ch.val(); const id=ch.key; ui.adminMessagesList.innerHTML += `<div style="display:flex;justify-content:space-between;padding:6px;border-bottom:1px solid rgba(255,255,255,0.03)"><div><strong>${escapeHtml(m.username)}</strong><div style="font-size:12px;color:rgba(255,255,255,0.6)">${escapeHtml(m.text||'')}</div></div><div><button class="delete-btn" onclick="deleteMessage('${id}')">Suppr</button></div></div>`; }); }
-
-// admin actions
-async function adminBroadcast(){ if(!adminUnlocked) return showError('Admin req'); const t = prompt('Message broadcast'); if(!t) return; await push(ref(db,'messages'), { text: t, timestamp: Date.now(), username: 'ADMIN', userId: 'ADMIN', type:'broadcast', room: 'general' }); showSuccess('Broadcast envoyé'); }
-async function adminCreateNotificationNode(){ if(!adminUnlocked) return showError('Admin req'); const title = prompt('Titre'); const body = prompt('Message'); if(!title||!body) return; await push(ref(db,'notifications'), { title, body, createdAt: Date.now(), by: currentUser.uid }); showSuccess('Noeud créé'); }
-async function openPromoteDialog(){ openModal('adminPanel'); loadAdminUsers(); }
-async function adminSetColor(){ if(!adminUnlocked) return showError('Admin req'); const c = prompt('Hex couleur (ex: #8b5cf6)'); if(!c) return; await set(ref(db,'settings/themeColor'), c); applyThemeColor(c); showSuccess('Couleur changée'); }
-async function adminExportUsersCSV(){ if(!adminUnlocked) return showError('Admin req'); const snap = await get(ref(db,'users')); let csv = 'uid,username,email,isAdmin,createdAt\n'; if (snap.exists()) { snap.forEach(ch=>{ const u=ch.val(); csv += `${ch.key},"${(u.username||'').replace(/"/g,'""')}","${(u.email||'').replace(/"/g,'""')}",${u.isAdmin?1:0},${u.createdAt||''}\n`; }); } downloadBlob(csv,'users.csv','text/csv'); showSuccess('CSV'); }
-async function adminClearMessages(){ if(!adminUnlocked) return showError('Admin req'); if(!confirm('Vider messages ?')) return; await remove(ref(db,'messages')); showSuccess('Messages vidés'); }
-
-// delete message
-window.deleteMessage = async (id) => { if (!currentUser) return showError('Connecte-toi'); const snap = await get(ref(db,'messages/'+id)); const m=snap.val(); if (!m) return showError('Introuvable'); if (m.userId===currentUser.uid || adminUnlocked) { await remove(ref(db,'messages/'+id)); showSuccess('Supprimé'); } else showError('Pas le droit'); };
-
-// settings / theme
-async function loadSettings(){ const snap = await get(ref(db,'settings/themeColor')); const c = snap.exists() ? snap.val() : '#6b21a8'; applyThemeColor(c); ui.themeColorPreview.style.background = c; }
-function applyThemeColor(c){ try { document.documentElement.style.setProperty('--primary', c); ui.themeColorPreview.style.background = c; } catch(e){ console.warn(e); } }
-
-// notifications: register SW & token, local notifications
-async function registerServiceWorkerAndNotifications(){
-  if ('serviceWorker' in navigator) { try { await navigator.serviceWorker.register('/sw.js'); console.log('sw registered'); } catch(e){ console.warn('sw reg fail', e); } }
-  if (!messaging) return;
-  try {
-    const perm = await Notification.requestPermission();
-    if (perm === 'granted') {
-      if (VAPID_KEY && VAPID_KEY.indexOf('<')===-1) {
-        const token = await getToken(messaging, { vapidKey: VAPID_KEY });
-        if (token && currentUser) await set(ref(db, `fcmTokens/${currentUser.uid}`), { token, ts: Date.now() });
-      } else console.warn('VAPID_KEY not set');
-    }
-    onMessage(messaging, payload => {
-      showLocalNotification(payload.notification?.title || 'PotesHub', payload.notification?.body || '');
-    });
-  } catch(e){ console.warn(e); }
-}
-function showLocalNotification(title, body){
-  if (!('Notification' in window)) return;
-  if (Notification.permission !== 'granted') return;
-  navigator.serviceWorker.getRegistration().then(reg => {
-    if (reg) reg.showNotification(title, { body, icon: '/icon-192.png', tag: 'poteshub' });
-    else new Notification(title, { body, icon: '/icon-192.png' });
-  });
-}
-
-// blob->dataurl util
-function downloadBlob(content, filename, mime){ const blob = new Blob([content], { type: mime }); const url = URL.createObjectURL(blob); const a = document.createElement('a'); a.href=url; a.download=filename; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
-function blobToDataURL(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); }); }
-
-// sha256 helper
-async function sha256Hex(message){ const msgUint8 = new TextEncoder().encode(message); const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8); const hashArray = Array.from(new Uint8Array(hashBuffer)); return hashArray.map(b=>b.toString(16).padStart(2,'0')).join(''); }
-window.sha256Hex = sha256Hex;
-
-// WebRTC group voice (basic signaling via Realtime DB)
-const rtcConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-let pc = null; // RTCPeerConnection for current client
-let localStream = null;
-async function startVoiceRoom(){
-  if (!activeGroupId) return showError('Active un groupe pour lancer le vocal');
-  // check membership
-  const memSnap = await get(ref(db, `groups/${activeGroupId}/members/${currentUser.uid}`));
-  if (!memSnap.exists()) return showError('Tu n\'es pas membre du groupe');
-  // get local audio
-  try {
-    localStream = await navigator.mediaDevices.getUserMedia({ audio:true });
-  } catch(e){ return showError('Impossible d\'accéder au micro'); }
-  pc = new RTCPeerConnection(rtcConfig);
-  // add local tracks
-  for (const t of localStream.getTracks()) pc.addTrack(t, localStream);
-  pc.ontrack = (evt) => {
-    // create audio element for remote stream
-    const remoteAudio = document.createElement('audio');
-    remoteAudio.autoplay = true;
-    remoteAudio.srcObject = evt.streams[0];
-    remoteAudio.style.maxWidth='100%';
-    ui.recPreview.appendChild(remoteAudio);
-  };
-  // ICE candidate -> push to DB
-  pc.onicecandidate = async (e) => {
-    if (e.candidate) await push(ref(db, `webrtc/${activeGroupId}/candidates/${currentUser.uid}`), e.candidate.toJSON());
-  };
-  // create offer and store in DB
-  const offer = await pc.createOffer();
-  await pc.setLocalDescription(offer);
-  await set(ref(db, `webrtc/${activeGroupId}/offer/${currentUser.uid}`), { sdp: offer.sdp, type: offer.type, createdAt: Date.now(), from: currentUser.uid });
-  // listen for answers from others
-  onValue(ref(db, `webrtc/${activeGroupId}/answer`), snap=>{
-    if (!snap.exists()) return;
-    snap.forEach(child => {
-      const ans = child.val();
-      if (ans.to === currentUser.uid) {
-        const remoteDesc = { type: ans.type, sdp: ans.sdp };
-        pc.setRemoteDescription(remoteDesc).catch(e=>console.warn(e));
-      }
-    });
-  });
-  // listen for candidates
-  onValue(ref(db, `webrtc/${activeGroupId}/candidates`), snap=>{
-    if (!snap.exists()) return;
-    snap.forEach(child => {
-      const c = child.val();
-      try { pc.addIceCandidate(c).catch(()=>{}); } catch(e){}
-    });
-  });
-  showSuccess('Vocal lancé (beta). Les membres peuvent répondre.');
-}
-
-// When someone else launches a voice, they will create offer/<uid>. Each member can create an answer targeted to offerer.
-// Simple flow: heavy but works for small groups.
-onValue(ref(db, 'webrtc'), snap=>{
-  // only handle offers in current group
-  if (!snap.exists() || !activeGroupId) return;
-  const groupNode = snap.child(activeGroupId);
-  if (!groupNode.exists()) return;
-  const offersNode = groupNode.child('offer');
-  if (!offersNode.exists()) return;
-  offersNode.forEach(async offerChild => {
-    const offerObj = offerChild.val();
-    const offerFrom = offerChild.key;
-    if (offerFrom === currentUser.uid) return; // ignore my own offer
-    // create peer connection and answer
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio:true });
-      const pc2 = new RTCPeerConnection(rtcConfig);
-      for (const t of stream.getTracks()) pc2.addTrack(t, stream);
-      pc2.ontrack = e => { const remote = document.createElement('audio'); remote.autoplay=true; remote.srcObject = e.streams[0]; ui.recPreview.appendChild(remote); };
-      pc2.onicecandidate = async (e) => { if (e.candidate) await push(ref(db, `webrtc/${activeGroupId}/candidates/${currentUser.uid}`), e.candidate.toJSON()); };
-      await pc2.setRemoteDescription({ type: offerObj.type, sdp: offerObj.sdp });
-      const answer = await pc2.createAnswer();
-      await pc2.setLocalDescription(answer);
-      // put answer targeted to offerer
-      const ansObj = { sdp: answer.sdp, type: answer.type, to: offerFrom, from: currentUser.uid };
-      await push(ref(db, `webrtc/${activeGroupId}/answer`), ansObj);
-      showSuccess('Tu as rejoint le vocal (beta)');
-    } catch(e){ console.warn(e); }
-  });
-});
-
-// simple UI section switching
-function showSection(name){
-  ['chat','polls','challenges'].forEach(n => { $(n+'Section') && $(n+'Section').classList.toggle('hidden', n!==name); document.querySelector(`#nav${capitalize(n)}`) && document.querySelector(`#nav${capitalize(n)}`).classList.toggle('active', n===name); });
-  // nav buttons are separate IDs navChat, navPolls, navChallenges
-  ['navChat','navPolls','navChallenges'].forEach(id => $(id) && $(id).classList.remove('active'));
-  const map = { chat:'navChat', polls:'navPolls', challenges:'navChallenges' };
-  $(map[name]).classList.add('active');
-}
-function capitalize(s){ return s.charAt(0).toUpperCase() + s.slice(1); }
-
-// utilities: render admin messages
-function renderAdminMessagesList(arr){
-  ui.adminMessagesList.innerHTML = arr.map(m => `<div style="display:flex;justify-content:space-between;padding:6px;border-bottom:1px solid rgba(255,255,255,0.03)"><div><strong>${escapeHtml(m.username)}</strong><div style="font-size:12px;color:rgba(255,255,255,0.6)">${escapeHtml(m.text||'')}</div></div><div><button class="delete-btn" onclick="deleteMessage('${m.id}')">Suppr</button></div></div>`).join('');
-}
-
-// delete message fallback
-window.deleteMessage = async (id) => { if (!currentUser) return showError('Connecte-toi'); const snap = await get(ref(db,'messages/'+id)); const m = snap.val(); if (!m) return showError('Introuvable'); if (m.userId === currentUser.uid || adminUnlocked) { await remove(ref(db,'messages/'+id)); showSuccess('Supprimé'); } else showError('Pas le droit'); };
-
-// initial load
-renderGroups();
-loadSettings();
-showSection('chat');
-
-console.log('PotesHub V4 chargé');

@@ -1,9 +1,0 @@
-{
-  "buildCommand": "npm ci && npm run build",
-  "outputDirectory": "dist",
-  "rootDirectory": "",
-  "installCommand": "npm install",
-  "environmentVariables": {
-    "NODE_VERSION": "18"
-  }
-}

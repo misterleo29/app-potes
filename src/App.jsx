@@ -490,4 +490,185 @@ function renderApp() {
                   ${userId !== DB.currentUser.id ? `
                     <div class="flex gap-2 flex-wrap">
                       ${!user.isAdmin ? `<button onclick="promoteToAdmin('${userId}')" class="flex-1 bg-yellow-500 text-white py-2 px-3 rounded-xl text-sm font-bold">👑 Admin</button>` : `<button onclick="removeAdmin('${userId}')" class="flex-1 bg-gray-400 text-white py-2 px-3 rounded-xl text-sm font-bold">Retirer</button>`}
-                      ${!user.isBanned ? `<button onclick="banUser('${userId}')" class="flex
+                      ${!user.isBanned ? `<button onclick="banUser('${userId}')" class="flex-1 bg-red-500 text-white py-2 px-3 rounded-xl text-sm font-bold">🚫 Bannir</button>` : `<button onclick="unbanUser('${userId}')" class="flex-1 bg-green-500 text-white py-2 px-3 rounded-xl text-sm font-bold">✅ Débannir</button>`}
+                    </div>
+                  ` : ''}
+                </div>
+              `).join('')}
+            </div>
+          `}
+          <button onclick="closeModal('adminModal')" class="w-full mt-6 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold">Fermer</button>
+        </div>
+      </div>
+
+      <!-- CUSTOM RESPONSE MODAL -->
+      <div id="customResponseModal" class="hidden fixed inset-0 bg-black/70 backdrop-blur-md flex items-center justify-center z-50 p-4">
+        <div class="bg-white rounded-3xl p-8 w-full max-w-md shadow-2xl animate-slideIn">
+          <h3 class="text-2xl font-black mb-4 text-purple-600">💬 Réponse personnalisée</h3>
+          <textarea id="customResponseText" placeholder="Écris ta réponse..." class="w-full px-4 py-4 border-2 border-gray-200 rounded-xl outline-none resize-none font-medium" rows="4"></textarea>
+          <div class="flex gap-3 mt-4">
+            <button onclick="closeModal('customResponseModal')" class="flex-1 bg-gray-100 text-gray-700 py-4 rounded-xl font-bold">Annuler</button>
+            <button onclick="doCustomResponse()" class="flex-1 bg-gradient-to-r from-purple-600 to-pink-500 text-white py-4 rounded-xl font-black">Envoyer</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+}
+
+function attachAuthListeners() {
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-btn').forEach(b => {
+        b.classList.remove('bg-gradient-to-r', 'from-purple-600', 'to-pink-500', 'text-white');
+        b.classList.add('text-gray-600');
+      });
+      btn.classList.add('bg-gradient-to-r', 'from-purple-600', 'to-pink-500', 'text-white');
+      btn.classList.remove('text-gray-600');
+      
+      document.querySelectorAll('.auth-form').forEach(f => f.classList.add('hidden'));
+      const tab = btn.dataset.tab === 'login' ? 'loginForm' : 'signupForm';
+      document.getElementById(tab).classList.remove('hidden');
+    });
+  });
+}
+
+function attachAppListeners() {
+  document.querySelectorAll('.tab-nav').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.tab-nav').forEach(b => b.classList.remove('text-purple-600', 'border-b-2', 'border-purple-600'));
+      btn.classList.add('text-purple-600', 'border-b-2', 'border-purple-600');
+    });
+  });
+}
+
+// ========== EVENT HANDLERS ==========
+function switchTab(tab) {
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    b.classList.remove('bg-gradient-to-r', 'from-purple-600', 'to-pink-500', 'text-white');
+    b.classList.add('text-gray-600');
+  });
+  document.querySelector(`[data-tab="${tab}"]`).classList.add('bg-gradient-to-r', 'from-purple-600', 'to-pink-500', 'text-white');
+  document.querySelectorAll('.auth-form').forEach(f => f.classList.add('hidden'));
+  document.getElementById(`${tab}Form`).classList.remove('hidden');
+}
+
+function doLogin() {
+  const email = document.getElementById('loginEmail').value;
+  const password = document.getElementById('loginPassword').value;
+  handleSignIn(email, password);
+}
+
+function doSignUp() {
+  const username = document.getElementById('signupUsername').value;
+  const email = document.getElementById('signupEmail').value;
+  const password = document.getElementById('signupPassword').value;
+  handleSignUp(email, password, username);
+}
+
+function openTab(tab) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
+  document.getElementById(tab + 'Tab').classList.remove('hidden');
+  
+  document.querySelectorAll('.tab-nav').forEach(b => b.classList.remove('text-purple-600', 'border-b-2', 'border-purple-600'));
+  const tabNames = { requests: '⚡ Demandes', events: '📅 Événements', notifications: '🔔 Notifs' };
+  Array.from(document.querySelectorAll('.tab-nav')).find(b => b.textContent.includes(tabNames[tab])).classList.add('text-purple-600', 'border-b-2', 'border-purple-600');
+}
+
+function selectType(type) {
+  document.querySelectorAll('.type-btn').forEach(b => b.classList.remove('bg-white', 'text-purple-600'));
+  document.querySelector(`[data-type="${type}"]`).classList.add('bg-white', 'text-purple-600');
+  window.selectedType = type;
+}
+
+function doAddRequest() {
+  const msg = document.getElementById('requestMsg').value;
+  addRequest(window.selectedType || '🎮 Jouer', msg);
+  document.getElementById('requestMsg').value = '';
+  window.selectedType = null;
+}
+
+function respondRequest(requestId, response) {
+  respondToRequest(requestId, response);
+}
+
+function openCustomResponse(requestId) {
+  window.customResponseRequestId = requestId;
+  document.getElementById('customResponseModal').classList.remove('hidden');
+}
+
+function doCustomResponse() {
+  const text = document.getElementById('customResponseText').value;
+  if (text.trim()) {
+    respondToRequest(window.customResponseRequestId, 'custom', text);
+    document.getElementById('customResponseText').value = '';
+    closeModal('customResponseModal');
+  }
+}
+
+function doAddEvent() {
+  const title = document.getElementById('eventTitle').value;
+  const date = document.getElementById('eventDate').value;
+  const time = document.getElementById('eventTime').value;
+  addEvent(title, date, time);
+  document.getElementById('eventTitle').value = '';
+  document.getElementById('eventDate').value = '';
+  document.getElementById('eventTime').value = '';
+}
+
+function openTab(tab) {
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.add('hidden'));
+  if (tab === 'messages') {
+    document.getElementById('messagesModal').classList.remove('hidden');
+  } else if (tab === 'admin') {
+    document.getElementById('adminModal').classList.remove('hidden');
+  } else {
+    document.getElementById(tab + 'Tab').classList.remove('hidden');
+  }
+}
+
+function closeModal(modalId) {
+  document.getElementById(modalId).classList.add('hidden');
+}
+
+function selectChatUser(userId) {
+  window.selectedChatUserId = userId;
+  const msgs = getMessages(userId);
+  const area = document.getElementById('messagesArea');
+  area.innerHTML = msgs.map(m => `
+    <div class="flex ${m.from === DB.currentUser.id ? 'justify-end' : 'justify-start'}">
+      <div class="max-w-xs p-4 rounded-2xl ${m.from === DB.currentUser.id ? 'bg-blue-500 text-white' : 'bg-white text-gray-800 border-2 border-gray-200'}">
+        <p class="font-bold text-sm mb-1">${m.fromName}</p>
+        <p>${m.text}</p>
+        <p class="text-xs opacity-70 mt-1">${new Date(m.timestamp).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>
+      </div>
+    </div>
+  `).join('');
+  area.scrollTop = area.scrollHeight;
+}
+
+function doSendMessage() {
+  const text = document.getElementById('messageInput').value;
+  if (text.trim() && window.selectedChatUserId) {
+    sendMessage(window.selectedChatUserId, text);
+    document.getElementById('messageInput').value = '';
+    selectChatUser(window.selectedChatUserId);
+  }
+}
+
+function doAdminLogin() {
+  const password = document.getElementById('adminPassword').value;
+  adminLogin(password);
+  document.getElementById('adminPassword').value = '';
+}
+
+// ========== INIT ==========
+loadDB();
+if ('Notification' in window && Notification.permission === 'default') {
+  Notification.requestPermission();
+}
+render();
+</script>
+
+</body>
+</html>
